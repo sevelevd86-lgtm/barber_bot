@@ -81,11 +81,12 @@ def get_booked_slots():
     result = {}
     for slot_key, info in prebook_settings.items():
         if info.get("booked_by"):
+            # Формат slot_key: "15_Сентябрь_20:00"
             parts = slot_key.split("_")
             if len(parts) >= 3:
                 day = parts[0]
                 month = parts[1]
-                time = parts[2] + ":" + parts[3] if len(parts) > 3 else parts[2]
+                time = parts[2]  # уже с :00
                 if month not in result:
                     result[month] = {}
                 if day not in result[month]:
@@ -123,7 +124,7 @@ def get_available_slots_for_user():
             if len(parts) >= 3:
                 day = parts[0]
                 month = parts[1]
-                time = parts[2] + ":" + parts[3] if len(parts) > 3 else parts[2]
+                time = parts[2]
                 date_key = f"{day}_{month}"
                 if date_key not in available:
                     available[date_key] = []
@@ -413,7 +414,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("user_book_"):
         parts = data.replace("user_book_", "").split("_")
         date_key = parts[0] + "_" + parts[1]
-        time_slot = parts[2] + ":" + parts[3] if len(parts) > 3 else parts[2]
+        time_slot = parts[2]
         slot_key = f"{date_key}_{time_slot}"
 
         if slot_key not in prebook_settings or not prebook_settings[slot_key].get("available", False) or prebook_settings[slot_key].get("booked_by"):
@@ -585,7 +586,7 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_info = users.get(uid, {})
             parts = slot_key.split("_")
             date = parts[0] + "_" + parts[1]
-            time = parts[2] + ":" + parts[3] if len(parts) > 3 else parts[2]
+            time = parts[2]
             date_display = date.replace("_", " ")
             
             contact_text = (
@@ -692,7 +693,6 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["admin_date"] = date_key
 
         keyboard = []
-        # ЧАСЫ С 10:00 ДО 21:00 (22:00 УБРАН)
         for hour in range(10, 22):
             time_slot = f"{hour:02d}:00"
             slot_key = f"{date_key}_{time_slot}"
@@ -778,7 +778,7 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_info = users.get(uid, {})
             parts = slot_key.split("_")
             date = parts[0] + "_" + parts[1]
-            time = parts[2] + ":" + parts[3] if len(parts) > 3 else parts[2]
+            time = parts[2]
             date_display = date.replace("_", " ")
             
             contact_text = (
@@ -821,7 +821,6 @@ async def show_admin_day(update: Update, context: ContextTypes.DEFAULT_TYPE, day
     context.user_data["admin_date"] = date_key
 
     keyboard = []
-    # ЧАСЫ С 10:00 ДО 21:00 (22:00 УБРАН)
     for hour in range(10, 22):
         time_slot = f"{hour:02d}:00"
         slot_key = f"{date_key}_{time_slot}"
