@@ -1,13 +1,13 @@
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters, ConversationHandler
 from datetime import datetime
 
 # ---------- НАСТРОЙКИ ----------
 TOKEN = "8944409425:AAGC659vkO9fJPzBAoHOTBVP-ClS4t0UclY"  # Замени на свой токен
 
-# ---------- СОСТОЯНИЯ ДЛЯ РАЗГОВОРА ----------
-NAME, PHONE = range(2)
+# ---------- СОСТОЯНИЯ ----------
+CONTACT = 1
 
 # ---------- ДАННЫЕ ----------
 SERVICES = {
@@ -15,14 +15,11 @@ SERVICES = {
     "борода": 1000,
     "комплекс": 2200,
 }
-
 FREE_SLOTS = ["10:00", "11:00", "12:00", "14:00", "15:00", "16:00", "17:00"]
 
-# Хранилище
 user_data_storage = {}  # {user_id: {"name": "...", "phone": "..."}}
-bookings = {}  # {user_id: [{"service": "...", "time": "...", "date": "..."}]}
+bookings = {}
 
-# ---------- ЛОГИРОВАНИЕ ----------
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -37,15 +34,19 @@ def main_menu():
     ]
     return InlineKeyboardMarkup(keyboard)
 
-# ---------- ПРОВЕРКА КОНТАКТОВ ----------
+def contact_keyboard():
+    """Кнопка для отправки контакта"""
+    button = KeyboardButton("📱 Отправить номер телефона", request_contact=True)
+    return ReplyKeyboardMarkup([[button]], resize_keyboard=True, one_time_keyboard=True)
+
 def has_contacts(user_id):
-    return user_id in user_data_storage and user_data_storage[user_id].get("name") and user_data_storage[user_id].get("phone")
+    return user_id in user_data_storage and user_data_storage[user_id].get("phone")
 
 # ---------- ОБРАБОТЧИКИ ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    first_name = update.effective_user.first_name
 
-    # Если контакты уже есть — сразу меню
     if has_contacts(user_id):
         await update.message.reply_text(
             f"✂️ С возвращением, {user_data_storage[user_id]['name']}!",
@@ -53,50 +54,43 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Если нет — просим ввести имя
-    await update.message.reply_text(
-        "👋 Привет! Давай познакомимся.\n\n"
-        "Как я могу к тебе обращаться? Напиши своё имя:"
-    )
-    return NAME
-
-async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    name = update.message.text.strip()
-
-    if len(name) < 2:
-        await update.message.reply_text("Имя слишком короткое. Напиши, пожалуйста, полностью:")
-        return NAME
-
-    # Сохраняем имя в контексте
-    context.user_data["temp_name"] = name
+    # Сохраняем имя из Telegram
+    if user_id not in user_data_storage:
+        user_data_storage[user_id] = {}
+    user_data_storage[user_id]["name"] = first_name
 
     await update.message.reply_text(
-        f"Отлично, {name}! Теперь укажи номер телефона, чтобы мы могли связаться с тобой:\n\n"
-        "Например: +7 (999) 123-45-67"
+        f"👋 Привет, {first_name}!\n\n"
+        "Чтобы я мог записывать тебя на стрижку, нажми на кнопку ниже и отправь свой номер телефона.",
+        reply_markup=contact_keyboard()
     )
-    return PHONE
+    return CONTACT
 
-async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    phone = update.message.text.strip()
+    contact = update.message.contact
 
-    # Простая проверка — есть ли цифры
-    if not any(ch.isdigit() for ch in phone):
+    if not contact:
         await update.message.reply_text(
-            "В номере должны быть цифры. Попробуй ещё раз (например: +7 999 123-45-67):"
+            "Пожалуйста, используй кнопку 'Отправить номер телефона'.",
+            reply_markup=contact_keyboard()
         )
-        return PHONE
+        return CONTACT
 
-    # Сохраняем в постоянное хранилище
-    user_data_storage[user_id] = {
-        "name": context.user_data.get("temp_name", "Гость"),
-        "phone": phone
-    }
+    # Сохраняем телефон
+    user_data_storage[user_id]["phone"] = contact.phone_number
+    # Если имя не было сохранено ранее — берём из контакта
+    if not user_data_storage[user_id].get("name"):
+        user_data_storage[user_id]["name"] = contact.first_name or "Гость"
 
     await update.message.reply_text(
-        f"✅ Спасибо, {user_data_storage[user_id]['name']}! Твой номер сохранён.\n\n"
+        f"✅ Отлично, {user_data_storage[user_id]['name']}! Твой номер сохранён.\n\n"
         "Теперь ты можешь пользоваться всеми функциями бота:",
+        reply_markup=main_menu()
+    )
+    # Убираем клавиатуру с кнопкой контакта
+    await update.message.reply_text(
+        "Выбери действие:",
         reply_markup=main_menu()
     )
     return ConversationHandler.END
@@ -107,16 +101,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user_id = update.effective_user.id
 
-    # Если контактов нет — просим их ввести
     if data != "edit_contacts" and not has_contacts(user_id):
         await query.edit_message_text(
-            "Сначала укажи свои контакты, чтобы я знал, как к тебе обращаться.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✏️ Ввести контакты", callback_data="edit_contacts")]
-            ])
+            "Сначала укажи свои контакты, нажав кнопку ниже.",
+            reply_markup=contact_keyboard()
         )
         return
 
+    # --- Остальные обработчики кнопок (без изменений) ---
     if data == "services":
         text = "💇 **Наши услуги и цены:**\n\n"
         for service, price in SERVICES.items():
@@ -126,10 +118,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "contacts":
         info = user_data_storage.get(user_id, {})
         text = (
-            "📞 **Контакты:**\n\n"
-            f"👤 Твоё имя: {info.get('name', 'Не указано')}\n"
-            f"📱 Твой телефон: {info.get('phone', 'Не указан')}\n\n"
-            "📍 Адрес: ул. Примерная, д. 10\n"
+            "📞 **Твои контакты:**\n\n"
+            f"👤 Имя: {info.get('name', 'Не указано')}\n"
+            f"📱 Телефон: {info.get('phone', 'Не указан')}\n\n"
+            "📍 Адрес барбершопа: ул. Примерная, д. 10\n"
             "📱 Телефон: +7 (999) 123-45-67\n"
             "📷 Instagram: @barbershop_example"
         )
@@ -138,10 +130,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "book":
         keyboard = [[InlineKeyboardButton(service.capitalize(), callback_data=f"service_{service}")] for service in SERVICES]
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back")])
-        await query.edit_message_text(
-            "Выбери услугу:",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        await query.edit_message_text("Выбери услугу:", reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif data == "my":
         user_bookings = bookings.get(user_id, [])
@@ -154,14 +143,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, reply_markup=main_menu(), parse_mode="Markdown")
 
     elif data == "edit_contacts":
-        # Очищаем старые данные и запускаем Conversation заново
         if user_id in user_data_storage:
             del user_data_storage[user_id]
         await query.edit_message_text(
-            "✏️ Давай обновим твои контакты.\n\n"
-            "Напиши своё имя:"
+            "✏️ Обновим твои контакты. Нажми кнопку ниже:",
+            reply_markup=contact_keyboard()
         )
-        return NAME
+        return CONTACT
 
     elif data == "back":
         await query.edit_message_text("Главное меню:", reply_markup=main_menu())
@@ -201,12 +189,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = Application.builder().token(TOKEN).build()
 
-    # ConversationHandler для сбора контактов
+    # Conversation для контактов
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
-            NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
-            PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_phone)],
+            CONTACT: [MessageHandler(filters.CONTACT, handle_contact)],
         },
         fallbacks=[],
     )
@@ -214,7 +201,7 @@ def main():
     app.add_handler(conv_handler)
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    logger.info("Бот запущен и работает...")
+    logger.info("Бот запущен...")
     app.run_polling()
 
 if __name__ == "__main__":
