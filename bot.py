@@ -647,7 +647,6 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             time = parts[2] + ":" + parts[3]
             date_display = date.replace("_", " ")
             
-            # ОТПРАВЛЯЕМ КОНТАКТЫ АДМИНУ
             contact_text = (
                 f"📋 **Данные клиента**\n\n"
                 f"📅 {date_display}\n"
@@ -658,19 +657,18 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"💬 Скопируй контакты и напиши клиенту!"
             )
             
-            # Отправляем отдельным сообщением, чтобы было удобно скопировать
+            # Отправляем новое сообщение с контактами
             await query.message.reply_text(
                 contact_text,
                 parse_mode="Markdown"
             )
             
-            # Показываем кнопки для управления
             keyboard = [
                 [InlineKeyboardButton("🗑️ Убрать запись", callback_data=f"admin_cancel_prebook_{slot_key}")],
                 [InlineKeyboardButton("🔙 Назад к дням", callback_data=f"admin_day_{date_display.replace(' ', '_')}")]
             ]
             await query.edit_message_text(
-                "✅ Контакты клиента отправлены выше!",
+                "📩 Контакты клиента отправлены выше! 👆",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
         else:
@@ -759,15 +757,4 @@ def main():
         states={
             CONTACT: [MessageHandler(filters.CONTACT, handle_contact)],
         },
-        fallbacks=[],
-    )
-
-    app.add_handler(conv_handler)
-    app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-
-    logger.info("Бот запущен...")
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+        fallbacks=
