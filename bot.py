@@ -1,13 +1,17 @@
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters, ConversationHandler
-from datetime import datetime
+from datetime import datetime, timedelta
+import json
+import os
 
 # ---------- НАСТРОЙКИ ----------
 TOKEN = "8944409425:AAGC659vkO9fJPzBAoHOTBVP-ClS4t0UclY"  # Замени на свой токен
+ADMIN_IDS = [5018476227]  # Замени на свой Telegram ID (узнай через @userinfobot)
 
 # ---------- СОСТОЯНИЯ ----------
 CONTACT = 1
+ADMIN_STATE = 10
 
 # ---------- ДАННЫЕ ----------
 SERVICES = {
@@ -15,10 +19,41 @@ SERVICES = {
     "борода": 1000,
     "комплекс": 2200,
 }
-FREE_SLOTS = ["10:00", "11:00", "12:00", "14:00", "15:00", "16:00", "17:00"]
 
-user_data_storage = {}  # {user_id: {"name": "...", "phone": "..."}}
-bookings = {}
+# Все возможные слоты (дни + время)
+ALL_SLOTS = {}
+for day_offset in range(7):  # 7 дней вперёд
+    date = (datetime.now() + timedelta(days=day_offset)).strftime("%Y-%m-%d")
+    ALL_SLOTS[date] = {
+        "10:00": False, "11:00": False, "12:00": False,
+        "14:00": False, "15:00": False, "16:00": False, "17:00": False
+    }
+
+# Хранилище пользователей
+users = {}  # {user_id: {"name": "...", "phone": "...", "contacts_given": True/False, "first_seen": "..."}}
+bookings = {}  # {user_id: [{"service": "...", "time": "...", "date": "..."}]}
+booked_slots = {}  # {"date_time": user_id} например "2026-08-20_10:00": 123456789
+
+# Файл для сохранения данных (чтобы не терять при перезапуске)
+DATA_FILE = "barber_data.json"
+
+def load_data():
+    global users, bookings, booked_slots
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            users = data.get("users", {})
+            bookings = data.get("bookings", {})
+            booked_slots = data.get("booked_slots", {})
+            # Конвертируем ключи обратно в int
+            users = {int(k): v for k, v in users.items()}
+            bookings = {int(k): v for k, v in bookings.items()}
+
+def save_data():
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump({"users": users, "bookings": bookings, "booked_slots": booked_slots}, f, ensure_ascii=False, indent=2)
+
+load_data()
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -35,29 +70,41 @@ def main_menu():
     return InlineKeyboardMarkup(keyboard)
 
 def contact_keyboard():
-    """Кнопка для отправки контакта"""
     button = KeyboardButton("📱 Отправить номер телефона", request_contact=True)
     return ReplyKeyboardMarkup([[button]], resize_keyboard=True, one_time_keyboard=True)
 
-def has_contacts(user_id):
-    return user_id in user_data_storage and user_data_storage[user_id].get("phone")
+def admin_menu():
+    keyboard = [
+        [InlineKeyboardButton("👥 Все пользователи", callback_data="admin_users")],
+        [InlineKeyboardButton("📅 Управление записями", callback_data="admin_bookings")],
+        [InlineKeyboardButton("🔙 Выход из админки", callback_data="admin_exit")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
 
-# ---------- ОБРАБОТЧИКИ ----------
+def has_contacts(user_id):
+    return user_id in users and users[user_id].get("phone") and users[user_id].get("contacts_given", False)
+
+# ---------- ОБРАБОТЧИКИ ПОЛЬЗОВАТЕЛЯ ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     first_name = update.effective_user.first_name
 
+    # Регистрируем пользователя (если его ещё нет)
+    if user_id not in users:
+        users[user_id] = {
+            "name": first_name,
+            "phone": None,
+            "contacts_given": False,
+            "first_seen": datetime.now().strftime("%Y-%m-%d %H:%M")
+        }
+        save_data()
+
     if has_contacts(user_id):
         await update.message.reply_text(
-            f"✂️ С возвращением, {user_data_storage[user_id]['name']}!",
+            f"✂️ С возвращением, {users[user_id]['name']}!",
             reply_markup=main_menu()
         )
         return
-
-    # Сохраняем имя из Telegram
-    if user_id not in user_data_storage:
-        user_data_storage[user_id] = {}
-    user_data_storage[user_id]["name"] = first_name
 
     await update.message.reply_text(
         f"👋 Привет, {first_name}!\n\n"
@@ -77,30 +124,39 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return CONTACT
 
-    # Сохраняем телефон
-    user_data_storage[user_id]["phone"] = contact.phone_number
-    # Если имя не было сохранено ранее — берём из контакта
-    if not user_data_storage[user_id].get("name"):
-        user_data_storage[user_id]["name"] = contact.first_name or "Гость"
+    users[user_id]["phone"] = contact.phone_number
+    users[user_id]["contacts_given"] = True
+    if not users[user_id].get("name"):
+        users[user_id]["name"] = contact.first_name or "Гость"
+    save_data()
 
     await update.message.reply_text(
-        f"✅ Отлично, {user_data_storage[user_id]['name']}! Твой номер сохранён.\n\n"
+        f"✅ Отлично, {users[user_id]['name']}! Твой номер сохранён.\n\n"
         "Теперь ты можешь пользоваться всеми функциями бота:",
         reply_markup=main_menu()
     )
-    # Убираем клавиатуру с кнопкой контакта
     await update.message.reply_text(
         "Выбери действие:",
         reply_markup=main_menu()
     )
     return ConversationHandler.END
 
+# ---------- ОБРАБОТЧИК КНОПОК ----------
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     data = query.data
     user_id = update.effective_user.id
 
+    # --- Админ-команды ---
+    if data.startswith("admin_"):
+        if user_id not in ADMIN_IDS:
+            await query.edit_message_text("⛔ У вас нет прав администратора.")
+            return
+        await admin_handler(update, context)
+        return
+
+    # --- Проверка контактов (кроме edit_contacts) ---
     if data != "edit_contacts" and not has_contacts(user_id):
         await query.edit_message_text(
             "Сначала укажи свои контакты, нажав кнопку ниже.",
@@ -108,7 +164,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # --- Остальные обработчики кнопок (без изменений) ---
+    # --- Обычные кнопки ---
     if data == "services":
         text = "💇 **Наши услуги и цены:**\n\n"
         for service, price in SERVICES.items():
@@ -116,21 +172,79 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, reply_markup=main_menu(), parse_mode="Markdown")
 
     elif data == "contacts":
-        info = user_data_storage.get(user_id, {})
         text = (
-            "📞 **Твои контакты:**\n\n"
-            f"👤 Имя: {info.get('name', 'Не указано')}\n"
-            f"📱 Телефон: {info.get('phone', 'Не указан')}\n\n"
-            "📍 Адрес барбершопа: ул. Примерная, д. 10\n"
+            "📞 **Связь с барбершопом:**\n\n"
+            "✂️ Telegram: @DMITROVSTAS\n"
+            "📍 Адрес: ул. Примерная, д. 10\n"
             "📱 Телефон: +7 (999) 123-45-67\n"
-            "📷 Instagram: @barbershop_example"
+            "📷 Instagram: @barbershop_example\n\n"
+            "🕐 Работаем: ежедневно с 10:00 до 21:00"
         )
         await query.edit_message_text(text, reply_markup=main_menu(), parse_mode="Markdown")
 
     elif data == "book":
-        keyboard = [[InlineKeyboardButton(service.capitalize(), callback_data=f"service_{service}")] for service in SERVICES]
+        # Показываем доступные дни
+        today = datetime.now()
+        keyboard = []
+        for i in range(7):
+            day = today + timedelta(days=i)
+            date_str = day.strftime("%Y-%m-%d")
+            day_label = day.strftime("%d.%m (%a)")
+            keyboard.append([InlineKeyboardButton(day_label, callback_data=f"day_{date_str}")])
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back")])
-        await query.edit_message_text("Выбери услугу:", reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.edit_message_text(
+            "📅 Выбери день для записи:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    elif data.startswith("day_"):
+        date_str = data.replace("day_", "")
+        context.user_data["selected_date"] = date_str
+        # Показываем свободное время в этот день
+        keyboard = []
+        for time_slot in ALL_SLOTS.get(date_str, {}):
+            is_booked = f"{date_str}_{time_slot}" in booked_slots
+            status = "❌" if is_booked else "✅"
+            keyboard.append([InlineKeyboardButton(f"{time_slot} {status}", callback_data=f"slot_{date_str}_{time_slot}")])
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="book")])
+        await query.edit_message_text(
+            f"📅 {datetime.strptime(date_str, '%Y-%m-%d').strftime('%d.%m.%Y')}\n"
+            "Выбери свободное время:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    elif data.startswith("slot_"):
+        parts = data.split("_")
+        date_str = parts[1]
+        time_slot = parts[2]
+        slot_key = f"{date_str}_{time_slot}"
+
+        # Проверяем, не занято ли уже
+        if slot_key in booked_slots:
+            await query.edit_message_text(
+                "❌ Это время уже занято. Выбери другое.",
+                reply_markup=main_menu()
+            )
+            return
+
+        service = context.user_data.get("selected_service", "стрижка")
+
+        if user_id not in bookings:
+            bookings[user_id] = []
+        bookings[user_id].append({"service": service, "time": time_slot, "date": date_str})
+
+        # Бронируем слот
+        booked_slots[slot_key] = user_id
+        save_data()
+
+        await query.edit_message_text(
+            f"✅ Запись подтверждена!\n\n"
+            f"Услуга: {service.capitalize()}\n"
+            f"Дата: {datetime.strptime(date_str, '%Y-%m-%d').strftime('%d.%m.%Y')}\n"
+            f"Время: {time_slot}\n\n"
+            "Мы ждём тебя! ✂️",
+            reply_markup=main_menu()
+        )
 
     elif data == "my":
         user_bookings = bookings.get(user_id, [])
@@ -139,12 +253,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             text = "📋 **Твои записи:**\n\n"
             for i, b in enumerate(user_bookings, 1):
-                text += f"{i}. {b['service']} — {b['date']} в {b['time']}\n"
+                date_display = datetime.strptime(b['date'], '%Y-%m-%d').strftime('%d.%m.%Y')
+                text += f"{i}. {b['service']} — {date_display} в {b['time']}\n"
         await query.edit_message_text(text, reply_markup=main_menu(), parse_mode="Markdown")
 
     elif data == "edit_contacts":
-        if user_id in user_data_storage:
-            del user_data_storage[user_id]
+        if user_id in users:
+            users[user_id]["contacts_given"] = False
+            users[user_id]["phone"] = None
+            save_data()
         await query.edit_message_text(
             "✏️ Обновим твои контакты. Нажми кнопку ниже:",
             reply_markup=contact_keyboard()
@@ -157,39 +274,93 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("service_"):
         service = data.replace("service_", "")
         context.user_data["selected_service"] = service
-        today = datetime.now().strftime("%d.%m.%Y")
-        keyboard = [[InlineKeyboardButton(slot, callback_data=f"time_{slot}")] for slot in FREE_SLOTS]
+        # Переходим к выбору дня
+        today = datetime.now()
+        keyboard = []
+        for i in range(7):
+            day = today + timedelta(days=i)
+            date_str = day.strftime("%Y-%m-%d")
+            day_label = day.strftime("%d.%m (%a)")
+            keyboard.append([InlineKeyboardButton(day_label, callback_data=f"day_{date_str}")])
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="book")])
         await query.edit_message_text(
             f"Выбрано: {service.capitalize()}\n\n"
-            f"📅 Сегодня ({today})\n"
-            "Выбери свободное время:",
+            "📅 Выбери день:",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
-    elif data.startswith("time_"):
-        time_slot = data.replace("time_", "")
-        service = context.user_data.get("selected_service", "стрижка")
-        date = datetime.now().strftime("%Y-%m-%d")
+# ---------- АДМИН-ХЕНДЛЕР ----------
+async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    data = query.data
 
-        if user_id not in bookings:
-            bookings[user_id] = []
-        bookings[user_id].append({"service": service, "time": time_slot, "date": date})
+    if data == "admin_users":
+        text = "👥 **Список пользователей:**\n\n"
+        with_contacts = []
+        without_contacts = []
 
-        await query.edit_message_text(
-            f"✅ Запись подтверждена!\n\n"
-            f"Услуга: {service.capitalize()}\n"
-            f"Дата: {datetime.now().strftime('%d.%m.%Y')}\n"
-            f"Время: {time_slot}\n\n"
-            "Мы ждём тебя! ✂️",
-            reply_markup=main_menu()
-        )
+        for uid, info in users.items():
+            name = info.get("name", "Без имени")
+            phone = info.get("phone", "Не указан")
+            if info.get("contacts_given", False):
+                with_contacts.append(f"• {name} — {phone}")
+            else:
+                without_contacts.append(f"• {name} (ID: {uid})")
+
+        text += "**✅ С контактами:**\n" + ("\n".join(with_contacts) if with_contacts else "Нет") + "\n\n"
+        text += "**❌ Без контактов:**\n" + ("\n".join(without_contacts) if without_contacts else "Нет")
+
+        await query.edit_message_text(text, reply_markup=admin_menu(), parse_mode="Markdown")
+
+    elif data == "admin_bookings":
+        # Показываем все записи по дням
+        if not booked_slots:
+            await query.edit_message_text("📅 Записей пока нет.", reply_markup=admin_menu())
+            return
+
+        text = "📅 **Все записи:**\n\n"
+        for slot, uid in booked_slots.items():
+            date, time = slot.split("_")
+            user_info = users.get(uid, {})
+            name = user_info.get("name", "Неизвестный")
+            service = "стрижка"  # можно доработать, чтобы хранить услугу
+            # Найдём услугу в записях пользователя
+            for b in bookings.get(uid, []):
+                if b["date"] == date and b["time"] == time:
+                    service = b["service"]
+                    break
+            date_display = datetime.strptime(date, '%Y-%m-%d').strftime('%d.%m.%Y')
+            text += f"• {date_display} в {time} — {name} ({service})\n"
+
+        # Кнопка для очистки всех записей
+        keyboard = [[InlineKeyboardButton("🗑️ Очистить все записи", callback_data="admin_clear_all")],
+                    [InlineKeyboardButton("🔙 Назад в админку", callback_data="admin_back")]]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data == "admin_clear_all":
+        booked_slots.clear()
+        bookings.clear()
+        save_data()
+        await query.edit_message_text("✅ Все записи очищены!", reply_markup=admin_menu())
+
+    elif data == "admin_back":
+        await query.edit_message_text("Админ-панель:", reply_markup=admin_menu())
+
+    elif data == "admin_exit":
+        await query.edit_message_text("Вы вышли из админ-панели.", reply_markup=main_menu())
+
+# ---------- КОМАНДА /ADMIN ----------
+async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text("⛔ У вас нет прав администратора.")
+        return
+    await update.message.reply_text("🔐 Админ-панель:", reply_markup=admin_menu())
 
 # ---------- ЗАПУСК ----------
 def main():
     app = Application.builder().token(TOKEN).build()
 
-    # Conversation для контактов
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
@@ -200,6 +371,7 @@ def main():
 
     app.add_handler(conv_handler)
     app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(CommandHandler("admin", admin_command))
 
     logger.info("Бот запущен...")
     app.run_polling()
