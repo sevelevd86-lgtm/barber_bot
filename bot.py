@@ -741,4 +741,31 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("❌ Слот не найден.", reply_markup=admin_menu())
 
     elif data == "admin_back":
-        await query.edit_message_text("Админ-пане
+        await query.edit_message_text("Админ-панель:", reply_markup=admin_menu())
+
+    elif data == "admin_exit":
+        await query.edit_message_text("Вы вышли из админ-панели.", reply_markup=main_menu())
+        # Сбрасываем состояние ConversationHandler
+        return ConversationHandler.END
+
+# ---------- ЗАПУСК ----------
+def main():
+    app = Application.builder().token(TOKEN).build()
+
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("start", start)],
+        states={
+            CONTACT: [MessageHandler(filters.CONTACT, handle_contact)],
+        },
+        fallbacks=[],
+    )
+
+    app.add_handler(conv_handler)
+    app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+
+    logger.info("Бот запущен...")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
