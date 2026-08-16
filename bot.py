@@ -757,4 +757,15 @@ def main():
         states={
             CONTACT: [MessageHandler(filters.CONTACT, handle_contact)],
         },
-        fallbacks=
+        fallbacks=[],
+    )
+
+    app.add_handler(conv_handler)
+    app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+
+    logger.info("Бот запущен...")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
