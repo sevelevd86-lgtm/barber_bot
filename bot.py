@@ -243,7 +243,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             bookings_text = ""
             for i, b in enumerate(user_bookings, 1):
                 bookings_text += f"{i}. {b['date']} в {b['time']} — {b['service']}\n"
-            # Добавляем кнопку отмены для каждой записи
             keyboard = []
             for i, b in enumerate(user_bookings):
                 keyboard.append([InlineKeyboardButton(
@@ -275,19 +274,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 booking_to_cancel = user_bookings[index]
                 slot_key = booking_to_cancel.get("slot_key")
                 
-                # Удаляем из bookings пользователя
                 del bookings[user_id][index]
                 if not bookings[user_id]:
                     del bookings[user_id]
                 
-                # Освобождаем слот в prebook_settings
                 if slot_key and slot_key in prebook_settings:
                     prebook_settings[slot_key]["booked_by"] = None
                     prebook_settings[slot_key]["available"] = False
                 
                 save_data()
                 
-                # Уведомляем админов
                 for admin_id, admin_info in admins.items():
                     if admin_info.get("sound_on", True):
                         try:
@@ -507,7 +503,7 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         row = []
         for month in months:
             if has_active_slots_in_month(month):
-                row.append(InlineKeyboardButton(f"📌{month}", callback_data=f"admin_month_{month}"))
+                row.append(InlineKeyboardButton(f"📌 {month}", callback_data=f"admin_month_{month}"))
             else:
                 row.append(InlineKeyboardButton(month, callback_data=f"admin_month_{month}"))
             if len(row) == 2:
@@ -537,7 +533,7 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         row = []
         for day in range(1, days + 1):
             if has_active_slots_in_day(str(day), month):
-                row.append(InlineKeyboardButton(f"📌{day}", callback_data=f"admin_day_{month}_{day}"))
+                row.append(InlineKeyboardButton(f"📌 {day}", callback_data=f"admin_day_{month}_{day}"))
             else:
                 row.append(InlineKeyboardButton(str(day), callback_data=f"admin_day_{month}_{day}"))
             if len(row) == 5:
@@ -573,12 +569,12 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     user_info = users.get(uid, {})
                     name = user_info.get("name", "Неизвестный")
                     keyboard.append([InlineKeyboardButton(
-                        f"{time_slot} ✍️{name}", 
+                        f"{time_slot} ✍️ {name}", 
                         callback_data=f"admin_show_user_{slot_key}"
                     )])
                 elif prebook_settings[slot_key].get("available", False):
                     keyboard.append([InlineKeyboardButton(
-                        f"{time_slot} ❌", 
+                        f"{time_slot} ✅", 
                         callback_data=f"admin_toggle_off_{slot_key}"
                     )])
                 else:
@@ -597,7 +593,7 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📅 **{day} {month}**\n\n"
             "➕ — создать слот (сразу станет доступен)\n"
             "⬜ — скрыт\n"
-            "❌ — доступен для пользователей\n"
+            "✅ — доступен для пользователей\n"
             "✍️ — занят (нажми для данных клиента)\n\n"
             "Нажимай на время, чтобы менять статус:",
             reply_markup=InlineKeyboardMarkup(keyboard),
@@ -651,8 +647,9 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             time = parts[2] + ":" + parts[3]
             date_display = date.replace("_", " ")
             
-            text = (
-                f"📋 **Данные клиента:**\n\n"
+            # ОТПРАВЛЯЕМ КОНТАКТЫ АДМИНУ
+            contact_text = (
+                f"📋 **Данные клиента**\n\n"
                 f"📅 {date_display}\n"
                 f"🕐 {time}\n\n"
                 f"👤 {user_info.get('name', 'Неизвестный')}\n"
@@ -660,11 +657,22 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"✂️ Telegram: @{user_info.get('username', 'Не указан')}\n\n"
                 f"💬 Скопируй контакты и напиши клиенту!"
             )
+            
+            # Отправляем отдельным сообщением, чтобы было удобно скопировать
+            await query.message.reply_text(
+                contact_text,
+                parse_mode="Markdown"
+            )
+            
+            # Показываем кнопки для управления
             keyboard = [
                 [InlineKeyboardButton("🗑️ Убрать запись", callback_data=f"admin_cancel_prebook_{slot_key}")],
                 [InlineKeyboardButton("🔙 Назад к дням", callback_data=f"admin_day_{date_display.replace(' ', '_')}")]
             ]
-            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+            await query.edit_message_text(
+                "✅ Контакты клиента отправлены выше!",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
         else:
             await query.edit_message_text("❌ Информация не найдена.", reply_markup=admin_menu())
         return
@@ -711,12 +719,12 @@ async def show_admin_day(update: Update, context: ContextTypes.DEFAULT_TYPE, day
                 user_info = users.get(uid, {})
                 name = user_info.get("name", "Неизвестный")
                 keyboard.append([InlineKeyboardButton(
-                    f"{time_slot} ✍️{name}", 
+                    f"{time_slot} ✍️ {name}", 
                     callback_data=f"admin_show_user_{slot_key}"
                 )])
             elif prebook_settings[slot_key].get("available", False):
                 keyboard.append([InlineKeyboardButton(
-                    f"{time_slot} ❌", 
+                    f"{time_slot} ✅", 
                     callback_data=f"admin_toggle_off_{slot_key}"
                 )])
             else:
@@ -735,7 +743,7 @@ async def show_admin_day(update: Update, context: ContextTypes.DEFAULT_TYPE, day
         f"📅 **{day} {month}**\n\n"
         "➕ — создать слот (сразу станет доступен)\n"
         "⬜ — скрыт\n"
-        "❌ — доступен для пользователей\n"
+        "✅ — доступен для пользователей\n"
         "✍️ — занят (нажми для данных клиента)\n\n"
         "Нажимай на время, чтобы менять статус:",
         reply_markup=InlineKeyboardMarkup(keyboard),
