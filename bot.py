@@ -77,7 +77,7 @@ def has_contacts(user_id):
 
 # ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ----------
 def get_booked_slots():
-    """Возвращает все забронированные слоты {месяц: {день: [время, ...]}}"""
+    """Возвращает все забронированные слоты {месяц: {день: [{time, slot_key, booked_by}]}}"""
     result = {}
     for slot_key, info in prebook_settings.items():
         if info.get("booked_by"):
@@ -92,7 +92,8 @@ def get_booked_slots():
                     result[month][day] = []
                 result[month][day].append({
                     "time": time,
-                    "slot_key": slot_key
+                    "slot_key": slot_key,
+                    "booked_by": info["booked_by"]
                 })
     return result
 
@@ -517,7 +518,7 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, reply_markup=admin_menu(), parse_mode="Markdown")
         return
 
-    # ---------- НОВЫЙ РАЗДЕЛ: АКТИВНЫЕ ЗАПИСИ ----------
+    # ---------- РАЗДЕЛ: АКТИВНЫЕ ЗАПИСИ ----------
     if data == "admin_bookings":
         booked_slots = get_booked_slots()
         if not booked_slots:
@@ -563,8 +564,10 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         keyboard = []
         for slot in booked_slots[month][day]:
+            user_info = users.get(slot['booked_by'], {})
+            name = user_info.get("name", "Неизвестный")
             keyboard.append([InlineKeyboardButton(
-                f"🕐 {slot['time']} — {users.get(slot['booked_by'], {}).get('name', 'Неизвестный')}",
+                f"🕐 {slot['time']} — {name}",
                 callback_data=f"admin_booking_slot_{slot['slot_key']}"
             )])
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data=f"admin_booking_month_{month}")])
@@ -689,7 +692,8 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["admin_date"] = date_key
 
         keyboard = []
-        for hour in range(10, 23):
+        # ЧАСЫ С 10:00 ДО 21:00 (22:00 УБРАН)
+        for hour in range(10, 22):
             time_slot = f"{hour:02d}:00"
             slot_key = f"{date_key}_{time_slot}"
             
@@ -817,7 +821,8 @@ async def show_admin_day(update: Update, context: ContextTypes.DEFAULT_TYPE, day
     context.user_data["admin_date"] = date_key
 
     keyboard = []
-    for hour in range(10, 23):
+    # ЧАСЫ С 10:00 ДО 21:00 (22:00 УБРАН)
+    for hour in range(10, 22):
         time_slot = f"{hour:02d}:00"
         slot_key = f"{date_key}_{time_slot}"
         
