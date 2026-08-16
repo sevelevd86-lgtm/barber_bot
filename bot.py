@@ -6,7 +6,7 @@ import json
 import os
 
 # ---------- НАСТРОЙКИ ----------
-TOKEN = "ТВОЙ_ТОКЕН_ОТ_BOTFATHER"
+TOKEN = "8944409425:AAGC659vkO9fJPzBAoHOTBVP-ClS4t0UclY"
 
 # ---------- СОСТОЯНИЯ ----------
 CONTACT = 1
