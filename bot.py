@@ -7,8 +7,6 @@ import os
 
 # ---------- НАСТРОЙКИ ----------
 TOKEN = "ТВОЙ_ТОКЕН_ОТ_BOTFATHER"
-ADMIN_PASSWORD = "Стасбар"
-ADMIN_ID = 123456789  # Твой Telegram ID (узнай через @userinfobot)
 
 # ---------- СОСТОЯНИЯ ----------
 CONTACT = 1
@@ -17,24 +15,27 @@ CONTACT = 1
 users = {}
 bookings = {}
 prebook_settings = {}  # {"дата_время": {"booked_by": user_id или None, "available": True/False}}
+admins = {}  # {user_id: {"sound_on": True/False}}
 
 DATA_FILE = "barber_data.json"
 
 def load_data():
-    global users, bookings, prebook_settings
+    global users, bookings, prebook_settings, admins
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
             users = {int(k): v for k, v in data.get("users", {}).items()}
             bookings = {int(k): v for k, v in data.get("bookings", {}).items()}
             prebook_settings = data.get("prebook_settings", {})
+            admins = {int(k): v for k, v in data.get("admins", {}).items()}
 
 def save_data():
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump({
             "users": users,
             "bookings": bookings,
-            "prebook_settings": prebook_settings
+            "prebook_settings": prebook_settings,
+            "admins": admins
         }, f, ensure_ascii=False, indent=2)
 
 load_data()
@@ -57,10 +58,16 @@ def contact_keyboard():
     return ReplyKeyboardMarkup([[button]], resize_keyboard=True, one_time_keyboard=True)
 
 def admin_menu():
+    # Показываем статус звука для текущего админа
+    user_id = None
+    sound_status = "🟢 Вкл"  # по умолчанию
+    # В реальном коде user_id будет передан через контекст, но для клавиатуры мы не можем
+    # Поэтому просто показываем кнопку без статуса, статус будет в тексте сообщения
     keyboard = [
         [InlineKeyboardButton("👥 Все пользователи", callback_data="admin_users")],
         [InlineKeyboardButton("📅 Управление записями", callback_data="admin_bookings")],
         [InlineKeyboardButton("⚙️ Настройка предзаписи", callback_data="admin_prebook_setup")],
+        [InlineKeyboardButton("🔊 Вкл/Выкл звук", callback_data="admin_toggle_sound")],
         [InlineKeyboardButton("🔙 Выход из админки", callback_data="admin_exit")],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -124,8 +131,21 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------- ОБРАБОТЧИК ТЕКСТА ----------
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
-    if text == ADMIN_PASSWORD:
-        await update.message.reply_text("🔐 Админ-панель:", reply_markup=admin_menu())
+    user_id = update.effective_user.id
+    
+    if text == "Стасбар":
+        # Добавляем пользователя в админы
+        if user_id not in admins:
+            admins[user_id] = {"sound_on": True}
+            save_data()
+        # Показываем статус звука
+        sound_status = "🟢 Вкл" if admins[user_id]["sound_on"] else "🔴 Выкл"
+        await update.message.reply_text(
+            f"🔐 Админ-панель\n\n"
+            f"🔊 Звук: {sound_status}\n"
+            f"(уведомления о новых записях {'приходят' if admins[user_id]['sound_on'] else 'НЕ приходят'})",
+            reply_markup=admin_menu()
+        )
 
 # ---------- ОБРАБОТЧИК КНОПОК ----------
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -285,22 +305,24 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         })
         save_data()
 
-        # Уведомление админу
+        # Уведомление всем админам у которых включён звук
         user_info = users.get(user_id, {})
-        try:
-            await context.bot.send_message(
-                chat_id=ADMIN_ID,
-                text=f"📢 **НОВАЯ ПРЕДЗАПИСЬ!**\n\n"
-                     f"👤 {user_info.get('name', 'Неизвестный')}\n"
-                     f"📱 Телефон: {user_info.get('phone', 'Не указан')}\n"
-                     f"✂️ Telegram: @{user_info.get('username', 'Не указан')}\n"
-                     f"📅 {date_key.replace('_', ' ')}\n"
-                     f"🕐 {time_slot}\n\n"
-                     f"✅ Предзапись активирована!",
-                parse_mode="Markdown"
-            )
-        except:
-            pass
+        for admin_id, admin_info in admins.items():
+            if admin_info.get("sound_on", True):
+                try:
+                    await context.bot.send_message(
+                        chat_id=admin_id,
+                        text=f"📢 **НОВАЯ ПРЕДЗАПИСЬ!**\n\n"
+                             f"👤 {user_info.get('name', 'Неизвестный')}\n"
+                             f"📱 Телефон: {user_info.get('phone', 'Не указан')}\n"
+                             f"✂️ Telegram: @{user_info.get('username', 'Не указан')}\n"
+                             f"📅 {date_key.replace('_', ' ')}\n"
+                             f"🕐 {time_slot}\n\n"
+                             f"✅ Предзапись активирована!",
+                        parse_mode="Markdown"
+                    )
+                except:
+                    pass
 
         # Уведомление пользователю
         await query.edit_message_text(
@@ -331,6 +353,26 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data
     user_id = update.effective_user.id
+
+    if data == "admin_toggle_sound":
+        # Переключаем звук для текущего админа
+        if user_id in admins:
+            admins[user_id]["sound_on"] = not admins[user_id]["sound_on"]
+            save_data()
+            sound_status = "🟢 Вкл" if admins[user_id]["sound_on"] else "🔴 Выкл"
+            await query.edit_message_text(
+                f"🔊 Звук: {sound_status}\n"
+                f"(уведомления о новых записях {'приходят' if admins[user_id]['sound_on'] else 'НЕ приходят'})",
+                reply_markup=admin_menu()
+            )
+        else:
+            admins[user_id] = {"sound_on": True}
+            save_data()
+            await query.edit_message_text(
+                "🔊 Звук: 🟢 Вкл\n(уведомления о новых записях приходят)",
+                reply_markup=admin_menu()
+            )
+        return
 
     if data == "admin_users":
         text = "👥 **Список пользователей:**\n\n"
