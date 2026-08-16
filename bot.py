@@ -112,7 +112,6 @@ def get_available_slots_for_user():
     return available
 
 def format_month_buttons(months, callback_prefix):
-    """Форматирует месяцы по 2 в ряд"""
     keyboard = []
     row = []
     for month in months:
@@ -125,7 +124,6 @@ def format_month_buttons(months, callback_prefix):
     return keyboard
 
 def format_day_buttons(days, month, callback_prefix):
-    """Форматирует дни по 5 в ряд"""
     keyboard = []
     row = []
     for day in days:
@@ -242,17 +240,76 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         user_bookings = bookings.get(user_id, [])
         if user_bookings:
-            bookings_text = "\n".join([f"• {b['date']} в {b['time']} — {b['service']}" for b in user_bookings])
+            bookings_text = ""
+            for i, b in enumerate(user_bookings, 1):
+                bookings_text += f"{i}. {b['date']} в {b['time']} — {b['service']}\n"
+            # Добавляем кнопку отмены для каждой записи
+            keyboard = []
+            for i, b in enumerate(user_bookings):
+                keyboard.append([InlineKeyboardButton(
+                    f"❌ Отменить запись #{i+1} ({b['date']} {b['time']})",
+                    callback_data=f"cancel_booking_{i}"
+                )])
+            keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back")])
+            text = (
+                f"👤 **Твой профиль**\n\n"
+                f"Имя: {name}\n"
+                f"📱 Телефон: {phone}\n\n"
+                f"📋 **Твои записи:**\n{bookings_text}"
+            )
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         else:
-            bookings_text = "Нет активных записей"
+            text = (
+                f"👤 **Твой профиль**\n\n"
+                f"Имя: {name}\n"
+                f"📱 Телефон: {phone}\n\n"
+                f"📋 **Твои записи:**\nНет активных записей"
+            )
+            await query.edit_message_text(text, reply_markup=main_menu(), parse_mode="Markdown")
 
-        text = (
-            f"👤 **Твой профиль**\n\n"
-            f"Имя: {name}\n"
-            f"📱 Телефон: {phone}\n\n"
-            f"📋 **Твои записи:**\n{bookings_text}"
-        )
-        await query.edit_message_text(text, reply_markup=main_menu(), parse_mode="Markdown")
+    elif data.startswith("cancel_booking_"):
+        try:
+            index = int(data.replace("cancel_booking_", ""))
+            user_bookings = bookings.get(user_id, [])
+            if index < len(user_bookings):
+                booking_to_cancel = user_bookings[index]
+                slot_key = booking_to_cancel.get("slot_key")
+                
+                # Удаляем из bookings пользователя
+                del bookings[user_id][index]
+                if not bookings[user_id]:
+                    del bookings[user_id]
+                
+                # Освобождаем слот в prebook_settings
+                if slot_key and slot_key in prebook_settings:
+                    prebook_settings[slot_key]["booked_by"] = None
+                    prebook_settings[slot_key]["available"] = False
+                
+                save_data()
+                
+                # Уведомляем админов
+                for admin_id, admin_info in admins.items():
+                    if admin_info.get("sound_on", True):
+                        try:
+                            await context.bot.send_message(
+                                chat_id=admin_id,
+                                text=f"🗑️ **Пользователь отменил запись!**\n\n"
+                                     f"👤 {users[user_id]['name']}\n"
+                                     f"📅 {booking_to_cancel.get('date', '')}\n"
+                                     f"🕐 {booking_to_cancel.get('time', '')}",
+                                parse_mode="Markdown"
+                            )
+                        except:
+                            pass
+                
+                await query.edit_message_text(
+                    "✅ Запись успешно отменена!",
+                    reply_markup=main_menu()
+                )
+            else:
+                await query.edit_message_text("❌ Запись не найдена.", reply_markup=main_menu())
+        except Exception as e:
+            await query.edit_message_text(f"❌ Ошибка при отмене: {e}", reply_markup=main_menu())
 
     elif data == "prebook":
         available = get_available_slots_for_user()
@@ -594,14 +651,14 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             time = parts[2] + ":" + parts[3]
             date_display = date.replace("_", " ")
             
-            # Отправляем сообщение с данными клиента
             text = (
                 f"📋 **Данные клиента:**\n\n"
                 f"📅 {date_display}\n"
                 f"🕐 {time}\n\n"
                 f"👤 {user_info.get('name', 'Неизвестный')}\n"
                 f"📱 Телефон: {user_info.get('phone', 'Не указан')}\n"
-                f"✂️ Telegram: @{user_info.get('username', 'Не указан')}"
+                f"✂️ Telegram: @{user_info.get('username', 'Не указан')}\n\n"
+                f"💬 Скопируй контакты и напиши клиенту!"
             )
             keyboard = [
                 [InlineKeyboardButton("🗑️ Убрать запись", callback_data=f"admin_cancel_prebook_{slot_key}")],
@@ -618,6 +675,8 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             uid = prebook_settings[slot_key]["booked_by"]
             if uid in bookings:
                 bookings[uid] = [b for b in bookings[uid] if b.get("slot_key") != slot_key]
+                if not bookings[uid]:
+                    del bookings[uid]
             prebook_settings[slot_key]["booked_by"] = None
             prebook_settings[slot_key]["available"] = False
             save_data()
@@ -632,7 +691,6 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "admin_exit":
         await query.edit_message_text("Вы вышли из админ-панели.", reply_markup=main_menu())
-        # Сбрасываем состояние, чтобы кнопки работали
         context.user_data.clear()
         return
 
