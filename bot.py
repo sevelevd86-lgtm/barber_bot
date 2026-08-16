@@ -412,7 +412,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_data()
 
         user_info = users.get(user_id, {})
-        # Отправляем уведомления ВСЕМ админам с включённым звуком
         for admin_id, admin_info in admins.items():
             if admin_info.get("sound_on", True):
                 try:
@@ -427,8 +426,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                              f"✅ Предзапись активирована!",
                         parse_mode="Markdown"
                     )
-                except Exception as e:
-                    logger.error(f"Не удалось отправить уведомление админу {admin_id}: {e}")
+                except:
+                    pass
 
         await query.edit_message_text(
             "✅ **Вы записаны на предзапись!**\n\n"
@@ -569,6 +568,7 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     uid = prebook_settings[slot_key]["booked_by"]
                     user_info = users.get(uid, {})
                     name = user_info.get("name", "Неизвестный")
+                    # КНОПКА ДЛЯ ЗАНЯТОГО СЛОТА — ВЕДЁТ К ДАННЫМ КЛИЕНТА
                     keyboard.append([InlineKeyboardButton(
                         f"{time_slot} ✍️ {name}", 
                         callback_data=f"admin_show_user_{slot_key}"
@@ -648,16 +648,17 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             time = parts[2] + ":" + parts[3]
             date_display = date.replace("_", " ")
             
+            # ОТПРАВЛЯЕМ КОНТАКТЫ И КНОПКИ УПРАВЛЕНИЯ
             contact_text = (
                 f"📋 **Данные клиента**\n\n"
                 f"📅 {date_display}\n"
                 f"🕐 {time}\n\n"
                 f"👤 {user_info.get('name', 'Неизвестный')}\n"
                 f"📱 Телефон: {user_info.get('phone', 'Не указан')}\n"
-                f"✂️ Telegram: @{user_info.get('username', 'Не указан')}"
+                f"✂️ Telegram: @{user_info.get('username', 'Не указан')}\n\n"
+                f"Выбери действие:"
             )
             
-            # Кнопки: Снять бронь или Оставить
             keyboard = [
                 [InlineKeyboardButton("🗑️ Снять бронь", callback_data=f"admin_cancel_prebook_{slot_key}")],
                 [InlineKeyboardButton("🔙 Оставить и вернуться", callback_data=f"admin_day_{date_display.replace(' ', '_')}")]
