@@ -11,13 +11,12 @@ ADMIN_PASSWORD = "Стасбар"
 
 # ---------- СОСТОЯНИЯ ----------
 CONTACT = 1
-PREBOOK_SETUP = 2
 
 # ---------- ДАННЫЕ ----------
 users = {}
 bookings = {}
-booked_slots = {}
-prebook_settings = {}  # {date: {"10:00": False, "11:00": False, ...}} - глобальные настройки
+booked_slots = {}  # {"дата_время": user_id}
+prebook_settings = {}  # {"дата_время": {"booked_by": user_id, "booked_by_admin": False}}
 
 DATA_FILE = "barber_data.json"
 
@@ -81,7 +80,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "name": first_name,
             "phone": None,
             "contacts_given": False,
-            "first_seen": datetime.now().strftime("%Y-%m-%d %H:%M")
+            "first_seen": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "username": update.effective_user.username or "Не указан"
         }
         save_data()
 
@@ -177,13 +177,101 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, reply_markup=main_menu(), parse_mode="Markdown")
 
     elif data == "prebook":
-        # Показываем пустую предзапись
-        text = "📅 **Предварительная запись**\n\n"
-        text += "Здесь ты можешь посмотреть доступные даты и время для записи.\n"
-        text += "Но пока ничего нет. Загляни позже!"
+        # Показываем доступные слоты для пользователя
+        if not prebook_settings:
+            text = "📅 **Предварительная запись**\n\n"
+            text += "На данный момент нет доступных слотов для записи.\n"
+            text += "Загляни позже!"
+            await query.edit_message_text(text, reply_markup=main_menu(), parse_mode="Markdown")
+            return
 
-        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="back")]]
+        # Группируем по датам
+        slots_by_date = {}
+        for slot_key, info in prebook_settings.items():
+            if "booked_by" not in info:  # Если слот свободен
+                date, time = slot_key.split("_")
+                if date not in slots_by_date:
+                    slots_by_date[date] = []
+                slots_by_date[date].append(time)
+
+        if not slots_by_date:
+            text = "📅 **Предварительная запись**\n\n"
+            text += "На данный момент нет доступных слотов для записи.\n"
+            text += "Загляни позже!"
+            await query.edit_message_text(text, reply_markup=main_menu(), parse_mode="Markdown")
+            return
+
+        text = "📅 **Доступные слоты для предзаписи:**\n\n"
+        for date, times in slots_by_date.items():
+            text += f"**{date}**\n"
+            for time in times:
+                text += f"• {time}\n"
+            text += "\n"
+
+        keyboard = []
+        for date, times in slots_by_date.items():
+            for time in times:
+                keyboard.append([InlineKeyboardButton(
+                    f"{date} {time} ✅", 
+                    callback_data=f"prebook_{date}_{time}"
+                )])
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back")])
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data.startswith("prebook_"):
+        parts = data.replace("prebook_", "").split("_")
+        date = parts[0] + "_" + parts[1]
+        time = parts[2] + ":" + parts[3]
+        slot_key = f"{date}_{time}"
+
+        # Проверяем, не занят ли слот
+        if slot_key not in prebook_settings or "booked_by" in prebook_settings[slot_key]:
+            await query.edit_message_text("❌ Этот слот уже занят. Выбери другой.", reply_markup=main_menu())
+            return
+
+        # Бронируем слот для пользователя
+        prebook_settings[slot_key]["booked_by"] = user_id
+        prebook_settings[slot_key]["service"] = "Предзапись"
+        save_data()
+
+        # Добавляем в bookings пользователя
+        if user_id not in bookings:
+            bookings[user_id] = []
+        bookings[user_id].append({
+            "service": "Предзапись",
+            "time": time,
+            "date": date,
+            "slot_key": slot_key
+        })
+        save_data()
+
+        # Уведомление админу
+        admin_id = 123456789  # Замени на свой ID
+        user_info = users.get(user_id, {})
+        try:
+            await context.bot.send_message(
+                chat_id=admin_id,
+                text=f"📢 **НОВАЯ ПРЕДЗАПИСЬ!**\n\n"
+                     f"👤 {user_info.get('name', 'Неизвестный')}\n"
+                     f"📱 Телефон: {user_info.get('phone', 'Не указан')}\n"
+                     f"✂️ Telegram: @{user_info.get('username', 'Не указан')}\n"
+                     f"📅 {date}\n"
+                     f"🕐 {time}\n\n"
+                     f"✅ Предзапись активирована!",
+                parse_mode="Markdown"
+            )
+        except:
+            pass
+
+        # Уведомление пользователю
+        await query.edit_message_text(
+            "✅ **Вы записаны на предзапись!**\n\n"
+            "Вам напишут в Telegram!\n"
+            "Если есть вопросы, напишите сами!\n"
+            "Все данные для связи есть по кнопке «Контакты».",
+            reply_markup=main_menu(),
+            parse_mode="Markdown"
+        )
 
     elif data == "edit_contacts":
         if user_id in users:
@@ -203,6 +291,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data
+    user_id = update.effective_user.id
 
     if data == "admin_users":
         text = "👥 **Список пользователей:**\n\n"
@@ -223,11 +312,13 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, reply_markup=admin_menu(), parse_mode="Markdown")
 
     elif data == "admin_bookings":
+        # Показываем все записи с возможностью отмены
         if not booked_slots:
             await query.edit_message_text("📅 Записей пока нет.", reply_markup=admin_menu())
             return
 
         text = "📅 **Все записи:**\n\n"
+        keyboard = []
         for slot, uid in booked_slots.items():
             date, time = slot.split("_")
             user_info = users.get(uid, {})
@@ -239,18 +330,31 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     break
             date_display = datetime.strptime(date, '%Y-%m-%d').strftime('%d.%m.%Y')
             text += f"• {date_display} в {time} — {name} ({service})\n"
+            keyboard.append([InlineKeyboardButton(
+                f"❌ Отменить {date_display} {time} ({name})", 
+                callback_data=f"admin_cancel_{slot}"
+            )])
 
-        keyboard = [
-            [InlineKeyboardButton("🗑️ Очистить все записи", callback_data="admin_clear_all")],
-            [InlineKeyboardButton("🔙 Назад в админку", callback_data="admin_back")]
-        ]
+        keyboard.append([InlineKeyboardButton("🔙 Назад в админку", callback_data="admin_back")])
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
-    elif data == "admin_clear_all":
-        booked_slots.clear()
-        bookings.clear()
-        save_data()
-        await query.edit_message_text("✅ Все записи очищены!", reply_markup=admin_menu())
+    elif data.startswith("admin_cancel_"):
+        slot_key = data.replace("admin_cancel_", "")
+        if slot_key in booked_slots:
+            uid = booked_slots[slot_key]
+            # Удаляем из bookings пользователя
+            if uid in bookings:
+                bookings[uid] = [b for b in bookings[uid] if b.get("slot_key") != slot_key]
+            # Удаляем из booked_slots
+            del booked_slots[slot_key]
+            # Удаляем из prebook_settings если есть
+            if slot_key in prebook_settings and "booked_by" in prebook_settings[slot_key]:
+                del prebook_settings[slot_key]["booked_by"]
+                del prebook_settings[slot_key]["service"]
+            save_data()
+            await query.edit_message_text(f"✅ Запись {slot_key} отменена!", reply_markup=admin_menu())
+        else:
+            await query.edit_message_text("❌ Запись не найдена.", reply_markup=admin_menu())
 
     elif data == "admin_prebook_setup":
         # Показываем список месяцев
@@ -265,16 +369,16 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("admin_month_"):
         month = data.replace("admin_month_", "")
         context.user_data["admin_month"] = month
-        # Показываем дни месяца (30-31)
+        # Показываем дни месяца
         days = 31
         if month in ["Апрель", "Июнь", "Сентябрь", "Ноябрь"]:
             days = 30
         elif month == "Февраль":
-            days = 28  # упрощённо, без високосных годов
+            days = 28
 
         keyboard = []
         for day in range(1, days + 1):
-            keyboard.append([InlineKeyboardButton(f"{day} {month}", callback_data=f"admin_day_{month}_{day}")])
+            keyboard.append([InlineKeyboardButton(f"{day}", callback_data=f"admin_day_{month}_{day}")])
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="admin_prebook_setup")])
         await query.edit_message_text(f"📅 Выбери день в {month}:", reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -289,42 +393,98 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = []
         for hour in range(10, 23):
             time_slot = f"{hour:02d}:00"
-            # Проверяем, занят ли этот слот
-            is_booked = f"{date_key}_{time_slot}" in booked_slots
-            status = "❌" if is_booked else "✅"
-            keyboard.append([InlineKeyboardButton(f"{time_slot} {status}", callback_data=f"admin_time_{date_key}_{time_slot}")])
+            slot_key = f"{date_key}_{time_slot}"
+            
+            # Проверяем статус слота
+            if slot_key in prebook_settings and "booked_by" in prebook_settings[slot_key]:
+                # Занято пользователем
+                uid = prebook_settings[slot_key]["booked_by"]
+                user_info = users.get(uid, {})
+                name = user_info.get("name", "Неизвестный")
+                phone = user_info.get("phone", "Не указан")
+                username = user_info.get("username", "Не указан")
+                status = f"✍️ {name} ({phone})"
+                keyboard.append([InlineKeyboardButton(
+                    f"{time_slot} ✍️ {name}", 
+                    callback_data=f"admin_userinfo_{slot_key}"
+                )])
+            elif slot_key in booked_slots:
+                # Занято через обычную запись
+                uid = booked_slots[slot_key]
+                user_info = users.get(uid, {})
+                name = user_info.get("name", "Неизвестный")
+                status = f"❌ {name}"
+                keyboard.append([InlineKeyboardButton(
+                    f"{time_slot} ❌ {name}", 
+                    callback_data=f"admin_cancel_{slot_key}"
+                )])
+            else:
+                # Свободно
+                keyboard.append([InlineKeyboardButton(
+                    f"{time_slot} ✅", 
+                    callback_data=f"admin_toggle_{slot_key}"
+                )])
+        
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data=f"admin_month_{month}")])
-        await query.edit_message_text(f"📅 {day} {month}\nВыбери время для настройки:", reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.edit_message_text(
+            f"📅 {day} {month}\n\n"
+            "✅ - свободно\n"
+            "❌ - занято (обычная запись)\n"
+            "✍️ - предзапись (нажми для инфо)\n\n"
+            "Нажми на время, чтобы изменить статус:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
-    elif data.startswith("admin_time_"):
-        parts = data.replace("admin_time_", "").split("_")
-        # Формат: date_key_time
-        date_key = parts[0] + "_" + parts[1]  # день_месяц
-        time_slot = parts[2] + ":" + parts[3]  # час:00
-        slot_key = f"{date_key}_{time_slot}"
-
-        if slot_key in booked_slots:
-            # Если уже занято - разблокируем
-            del booked_slots[slot_key]
-            # Удаляем запись из bookings
-            for uid, user_bookings in bookings.items():
-                bookings[uid] = [b for b in user_bookings if f"{b['date']}_{b['time']}" != slot_key]
-            save_data()
-            await query.edit_message_text(f"✅ Время {time_slot} разблокировано!", reply_markup=admin_menu())
+    elif data.startswith("admin_toggle_"):
+        slot_key = data.replace("admin_toggle_", "")
+        # Добавляем слот в prebook_settings (свободный для пользователей)
+        if slot_key in prebook_settings:
+            if "booked_by" in prebook_settings[slot_key]:
+                # Если был занят пользователем - освобождаем
+                del prebook_settings[slot_key]["booked_by"]
+                del prebook_settings[slot_key]["service"]
+            else:
+                # Если был свободен - делаем доступным для пользователей
+                prebook_settings[slot_key] = {"booked_by": None}
         else:
-            # Если свободно - блокируем (имитация записи)
-            # Создаём фейковую запись для админа
-            admin_id = update.effective_user.id
-            if admin_id not in bookings:
-                bookings[admin_id] = []
-            bookings[admin_id].append({
-                "service": "админ-блокировка",
-                "time": time_slot,
-                "date": date_key
-            })
-            booked_slots[slot_key] = admin_id
+            prebook_settings[slot_key] = {"booked_by": None}
+        save_data()
+        await query.edit_message_text(f"✅ Слот {slot_key} обновлён!", reply_markup=admin_menu())
+
+    elif data.startswith("admin_userinfo_"):
+        slot_key = data.replace("admin_userinfo_", "")
+        if slot_key in prebook_settings and "booked_by" in prebook_settings[slot_key]:
+            uid = prebook_settings[slot_key]["booked_by"]
+            user_info = users.get(uid, {})
+            date, time = slot_key.split("_")
+            text = (
+                f"📋 **Информация о предзаписи:**\n\n"
+                f"📅 {date}\n"
+                f"🕐 {time}\n\n"
+                f"👤 {user_info.get('name', 'Неизвестный')}\n"
+                f"📱 Телефон: {user_info.get('phone', 'Не указан')}\n"
+                f"✂️ Telegram: @{user_info.get('username', 'Не указан')}"
+            )
+            keyboard = [
+                [InlineKeyboardButton("🔙 Назад", callback_data=f"admin_day_{date.replace('_', '_')}")],
+                [InlineKeyboardButton("🗑️ Отменить предзапись", callback_data=f"admin_cancel_prebook_{slot_key}")]
+            ]
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        else:
+            await query.edit_message_text("❌ Информация не найдена.", reply_markup=admin_menu())
+
+    elif data.startswith("admin_cancel_prebook_"):
+        slot_key = data.replace("admin_cancel_prebook_", "")
+        if slot_key in prebook_settings and "booked_by" in prebook_settings[slot_key]:
+            uid = prebook_settings[slot_key]["booked_by"]
+            if uid in bookings:
+                bookings[uid] = [b for b in bookings[uid] if b.get("slot_key") != slot_key]
+            del prebook_settings[slot_key]["booked_by"]
+            del prebook_settings[slot_key]["service"]
             save_data()
-            await query.edit_message_text(f"✅ Время {time_slot} заблокировано!", reply_markup=admin_menu())
+            await query.edit_message_text(f"✅ Предзапись {slot_key} отменена!", reply_markup=admin_menu())
+        else:
+            await query.edit_message_text("❌ Предзапись не найдена.", reply_markup=admin_menu())
 
     elif data == "admin_back":
         await query.edit_message_text("Админ-панель:", reply_markup=admin_menu())
