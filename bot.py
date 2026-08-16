@@ -6,12 +6,11 @@ import json
 import os
 
 # ---------- НАСТРОЙКИ ----------
-TOKEN = "8944409425:AAGC659vkO9fJPzBAoHOTBVP-ClS4t0UclY"  # Замени на свой токен
-ADMIN_IDS = [5018476227]  # Замени на свой Telegram ID (узнай через @userinfobot)
+TOKEN = "8944409425:AAGC659vkO9fJPzBAoHOTBVP-ClS4t0UclY"
+ADMIN_PASSWORD = "Стасбар"
 
 # ---------- СОСТОЯНИЯ ----------
 CONTACT = 1
-ADMIN_STATE = 10
 
 # ---------- ДАННЫЕ ----------
 SERVICES = {
@@ -20,21 +19,18 @@ SERVICES = {
     "комплекс": 2200,
 }
 
-# Все возможные слоты (дни + время)
 ALL_SLOTS = {}
-for day_offset in range(7):  # 7 дней вперёд
+for day_offset in range(7):
     date = (datetime.now() + timedelta(days=day_offset)).strftime("%Y-%m-%d")
     ALL_SLOTS[date] = {
         "10:00": False, "11:00": False, "12:00": False,
         "14:00": False, "15:00": False, "16:00": False, "17:00": False
     }
 
-# Хранилище пользователей
-users = {}  # {user_id: {"name": "...", "phone": "...", "contacts_given": True/False, "first_seen": "..."}}
-bookings = {}  # {user_id: [{"service": "...", "time": "...", "date": "..."}]}
-booked_slots = {}  # {"date_time": user_id} например "2026-08-20_10:00": 123456789
+users = {}
+bookings = {}
+booked_slots = {}
 
-# Файл для сохранения данных (чтобы не терять при перезапуске)
 DATA_FILE = "barber_data.json"
 
 def load_data():
@@ -42,12 +38,9 @@ def load_data():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-            users = data.get("users", {})
-            bookings = data.get("bookings", {})
+            users = {int(k): v for k, v in data.get("users", {}).items()}
+            bookings = {int(k): v for k, v in data.get("bookings", {}).items()}
             booked_slots = data.get("booked_slots", {})
-            # Конвертируем ключи обратно в int
-            users = {int(k): v for k, v in users.items()}
-            bookings = {int(k): v for k, v in bookings.items()}
 
 def save_data():
     with open(DATA_FILE, "w", encoding="utf-8") as f:
@@ -65,6 +58,7 @@ def main_menu():
         [InlineKeyboardButton("📅 Записаться", callback_data="book")],
         [InlineKeyboardButton("📞 Контакты", callback_data="contacts")],
         [InlineKeyboardButton("📋 Мои записи", callback_data="my")],
+        [InlineKeyboardButton("👤 Профиль", callback_data="profile")],  # Новая кнопка
         [InlineKeyboardButton("✏️ Изменить контакты", callback_data="edit_contacts")],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -89,7 +83,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     first_name = update.effective_user.first_name
 
-    # Регистрируем пользователя (если его ещё нет)
     if user_id not in users:
         users[user_id] = {
             "name": first_name,
@@ -130,16 +123,19 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         users[user_id]["name"] = contact.first_name or "Гость"
     save_data()
 
+    # ✅ ТЕПЕРЬ ТОЛЬКО ОДНО СООБЩЕНИЕ
     await update.message.reply_text(
         f"✅ Отлично, {users[user_id]['name']}! Твой номер сохранён.\n\n"
         "Теперь ты можешь пользоваться всеми функциями бота:",
         reply_markup=main_menu()
     )
-    await update.message.reply_text(
-        "Выбери действие:",
-        reply_markup=main_menu()
-    )
     return ConversationHandler.END
+
+# ---------- ОБРАБОТЧИК ТЕКСТА ----------
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    if text == ADMIN_PASSWORD:
+        await update.message.reply_text("🔐 Админ-панель:", reply_markup=admin_menu())
 
 # ---------- ОБРАБОТЧИК КНОПОК ----------
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -148,15 +144,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user_id = update.effective_user.id
 
-    # --- Админ-команды ---
     if data.startswith("admin_"):
-        if user_id not in ADMIN_IDS:
-            await query.edit_message_text("⛔ У вас нет прав администратора.")
-            return
         await admin_handler(update, context)
         return
 
-    # --- Проверка контактов (кроме edit_contacts) ---
     if data != "edit_contacts" and not has_contacts(user_id):
         await query.edit_message_text(
             "Сначала укажи свои контакты, нажав кнопку ниже.",
@@ -164,7 +155,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # --- Обычные кнопки ---
     if data == "services":
         text = "💇 **Наши услуги и цены:**\n\n"
         for service, price in SERVICES.items():
@@ -173,17 +163,33 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "contacts":
         text = (
-            "📞 **Связь с барбершопом:**\n\n"
+            "📞 **Связь с нами:**\n\n"
             "✂️ Telegram: @DMITROVSTAS\n"
             "📍 Адрес: ул. Примерная, д. 10\n"
-            "📱 Телефон: +7 (999) 123-45-67\n"
-            "📷 Instagram: @barbershop_example\n\n"
             "🕐 Работаем: ежедневно с 10:00 до 21:00"
         )
         await query.edit_message_text(text, reply_markup=main_menu(), parse_mode="Markdown")
 
+    elif data == "profile":
+        user_info = users.get(user_id, {})
+        phone = user_info.get("phone", "Не указан")
+        name = user_info.get("name", "Гость")
+
+        user_bookings = bookings.get(user_id, [])
+        if user_bookings:
+            bookings_text = "\n".join([f"• {b['date']} в {b['time']} — {b['service']}" for b in user_bookings])
+        else:
+            bookings_text = "Нет активных записей"
+
+        text = (
+            f"👤 **Твой профиль**\n\n"
+            f"Имя: {name}\n"
+            f"📱 Телефон: {phone}\n\n"
+            f"📋 **Твои записи:**\n{bookings_text}"
+        )
+        await query.edit_message_text(text, reply_markup=main_menu(), parse_mode="Markdown")
+
     elif data == "book":
-        # Показываем доступные дни
         today = datetime.now()
         keyboard = []
         for i in range(7):
@@ -192,15 +198,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             day_label = day.strftime("%d.%m (%a)")
             keyboard.append([InlineKeyboardButton(day_label, callback_data=f"day_{date_str}")])
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back")])
-        await query.edit_message_text(
-            "📅 Выбери день для записи:",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        await query.edit_message_text("📅 Выбери день для записи:", reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif data.startswith("day_"):
         date_str = data.replace("day_", "")
         context.user_data["selected_date"] = date_str
-        # Показываем свободное время в этот день
         keyboard = []
         for time_slot in ALL_SLOTS.get(date_str, {}):
             is_booked = f"{date_str}_{time_slot}" in booked_slots
@@ -208,8 +210,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard.append([InlineKeyboardButton(f"{time_slot} {status}", callback_data=f"slot_{date_str}_{time_slot}")])
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="book")])
         await query.edit_message_text(
-            f"📅 {datetime.strptime(date_str, '%Y-%m-%d').strftime('%d.%m.%Y')}\n"
-            "Выбери свободное время:",
+            f"📅 {datetime.strptime(date_str, '%Y-%m-%d').strftime('%d.%m.%Y')}\nВыбери свободное время:",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
@@ -219,21 +220,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         time_slot = parts[2]
         slot_key = f"{date_str}_{time_slot}"
 
-        # Проверяем, не занято ли уже
         if slot_key in booked_slots:
-            await query.edit_message_text(
-                "❌ Это время уже занято. Выбери другое.",
-                reply_markup=main_menu()
-            )
+            await query.edit_message_text("❌ Это время уже занято. Выбери другое.", reply_markup=main_menu())
             return
 
         service = context.user_data.get("selected_service", "стрижка")
-
         if user_id not in bookings:
             bookings[user_id] = []
         bookings[user_id].append({"service": service, "time": time_slot, "date": date_str})
-
-        # Бронируем слот
         booked_slots[slot_key] = user_id
         save_data()
 
@@ -241,8 +235,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"✅ Запись подтверждена!\n\n"
             f"Услуга: {service.capitalize()}\n"
             f"Дата: {datetime.strptime(date_str, '%Y-%m-%d').strftime('%d.%m.%Y')}\n"
-            f"Время: {time_slot}\n\n"
-            "Мы ждём тебя! ✂️",
+            f"Время: {time_slot}\n\nМы ждём тебя! ✂️",
             reply_markup=main_menu()
         )
 
@@ -274,7 +267,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("service_"):
         service = data.replace("service_", "")
         context.user_data["selected_service"] = service
-        # Переходим к выбору дня
         today = datetime.now()
         keyboard = []
         for i in range(7):
@@ -284,8 +276,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard.append([InlineKeyboardButton(day_label, callback_data=f"day_{date_str}")])
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="book")])
         await query.edit_message_text(
-            f"Выбрано: {service.capitalize()}\n\n"
-            "📅 Выбери день:",
+            f"Выбрано: {service.capitalize()}\n\n📅 Выбери день:",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
@@ -313,7 +304,6 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, reply_markup=admin_menu(), parse_mode="Markdown")
 
     elif data == "admin_bookings":
-        # Показываем все записи по дням
         if not booked_slots:
             await query.edit_message_text("📅 Записей пока нет.", reply_markup=admin_menu())
             return
@@ -323,8 +313,7 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             date, time = slot.split("_")
             user_info = users.get(uid, {})
             name = user_info.get("name", "Неизвестный")
-            service = "стрижка"  # можно доработать, чтобы хранить услугу
-            # Найдём услугу в записях пользователя
+            service = "стрижка"
             for b in bookings.get(uid, []):
                 if b["date"] == date and b["time"] == time:
                     service = b["service"]
@@ -332,9 +321,10 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             date_display = datetime.strptime(date, '%Y-%m-%d').strftime('%d.%m.%Y')
             text += f"• {date_display} в {time} — {name} ({service})\n"
 
-        # Кнопка для очистки всех записей
-        keyboard = [[InlineKeyboardButton("🗑️ Очистить все записи", callback_data="admin_clear_all")],
-                    [InlineKeyboardButton("🔙 Назад в админку", callback_data="admin_back")]]
+        keyboard = [
+            [InlineKeyboardButton("🗑️ Очистить все записи", callback_data="admin_clear_all")],
+            [InlineKeyboardButton("🔙 Назад в админку", callback_data="admin_back")]
+        ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
     elif data == "admin_clear_all":
@@ -348,14 +338,6 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "admin_exit":
         await query.edit_message_text("Вы вышли из админ-панели.", reply_markup=main_menu())
-
-# ---------- КОМАНДА /ADMIN ----------
-async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id not in ADMIN_IDS:
-        await update.message.reply_text("⛔ У вас нет прав администратора.")
-        return
-    await update.message.reply_text("🔐 Админ-панель:", reply_markup=admin_menu())
 
 # ---------- ЗАПУСК ----------
 def main():
@@ -371,7 +353,7 @@ def main():
 
     app.add_handler(conv_handler)
     app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(CommandHandler("admin", admin_command))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     logger.info("Бот запущен...")
     app.run_polling()
