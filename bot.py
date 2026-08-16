@@ -6,7 +6,7 @@ import json
 import os
 
 # ---------- НАСТРОЙКИ ----------
-TOKEN = "8944409425:AAGC659vkO9fJPzBAoHOTBVP-ClS4t0UclY"
+TOKEN = "ТВОЙ_ТОКЕН_ОТ_BOTFATHER"
 
 # ---------- СОСТОЯНИЯ ----------
 CONTACT = 1
@@ -58,11 +58,6 @@ def contact_keyboard():
     return ReplyKeyboardMarkup([[button]], resize_keyboard=True, one_time_keyboard=True)
 
 def admin_menu():
-    # Показываем статус звука для текущего админа
-    user_id = None
-    sound_status = "🟢 Вкл"  # по умолчанию
-    # В реальном коде user_id будет передан через контекст, но для клавиатуры мы не можем
-    # Поэтому просто показываем кнопку без статуса, статус будет в тексте сообщения
     keyboard = [
         [InlineKeyboardButton("👥 Все пользователи", callback_data="admin_users")],
         [InlineKeyboardButton("📅 Управление записями", callback_data="admin_bookings")],
@@ -74,6 +69,27 @@ def admin_menu():
 
 def has_contacts(user_id):
     return user_id in users and users[user_id].get("phone") and users[user_id].get("contacts_given", False)
+
+# ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ----------
+def has_active_slots_in_month(month):
+    """Проверяет, есть ли в месяце активные слоты (доступные или забронированные)"""
+    for slot_key, info in prebook_settings.items():
+        if info.get("available", False) or info.get("booked_by"):
+            date_part = slot_key.split("_")[0]
+            if "_" in date_part:
+                month_from_slot = date_part.split("_")[1]
+                if month_from_slot == month:
+                    return True
+    return False
+
+def has_active_slots_in_day(day, month):
+    """Проверяет, есть ли в конкретном дне активные слоты"""
+    date_key = f"{day}_{month}"
+    for slot_key, info in prebook_settings.items():
+        if slot_key.startswith(date_key):
+            if info.get("available", False) or info.get("booked_by"):
+                return True
+    return False
 
 # ---------- ОБРАБОТЧИКИ ПОЛЬЗОВАТЕЛЯ ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -134,11 +150,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
     if text == "Стасбар":
-        # Добавляем пользователя в админы
         if user_id not in admins:
             admins[user_id] = {"sound_on": True}
             save_data()
-        # Показываем статус звука
         sound_status = "🟢 Вкл" if admins[user_id]["sound_on"] else "🔴 Выкл"
         await update.message.reply_text(
             f"🔐 Админ-панель\n\n"
@@ -195,11 +209,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, reply_markup=main_menu(), parse_mode="Markdown")
 
     elif data == "prebook":
-        # Собираем месяцы, в которых есть свободные слоты
         months_with_slots = set()
         for slot_key, info in prebook_settings.items():
             if info.get("available", False) and not info.get("booked_by"):
-                date_part = slot_key.split("_")[0]  # день_месяц
+                date_part = slot_key.split("_")[0]
                 if "_" in date_part:
                     month = date_part.split("_")[1]
                     months_with_slots.add(month)
@@ -226,11 +239,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         month = data.replace("user_month_", "")
         context.user_data["user_month"] = month
 
-        # Собираем дни с доступными слотами
         days_with_slots = set()
         for slot_key, info in prebook_settings.items():
             if info.get("available", False) and not info.get("booked_by"):
-                date_part = slot_key.split("_")[0]  # день_месяц
+                date_part = slot_key.split("_")[0]
                 if "_" in date_part:
                     day, month_from_slot = date_part.split("_")
                     if month_from_slot == month:
@@ -256,7 +268,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         day = parts[1]
         date_key = f"{day}_{month}"
 
-        # Собираем доступные часы
         available_hours = []
         for slot_key, info in prebook_settings.items():
             if info.get("available", False) and not info.get("booked_by"):
@@ -281,20 +292,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("user_book_"):
         parts = data.replace("user_book_", "").split("_")
-        date_key = parts[0] + "_" + parts[1]  # день_месяц
-        time_slot = parts[2] + ":" + parts[3]  # час:00
+        date_key = parts[0] + "_" + parts[1]
+        time_slot = parts[2] + ":" + parts[3]
         slot_key = f"{date_key}_{time_slot}"
 
-        # Проверяем, не занят ли слот
         if slot_key not in prebook_settings or not prebook_settings[slot_key].get("available", False) or prebook_settings[slot_key].get("booked_by"):
             await query.edit_message_text("❌ Этот слот уже занят. Выбери другой.", reply_markup=main_menu())
             return
 
-        # Бронируем слот
         prebook_settings[slot_key]["booked_by"] = user_id
         save_data()
 
-        # Добавляем в bookings пользователя
         if user_id not in bookings:
             bookings[user_id] = []
         bookings[user_id].append({
@@ -305,7 +313,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         })
         save_data()
 
-        # Уведомление всем админам у которых включён звук
         user_info = users.get(user_id, {})
         for admin_id, admin_info in admins.items():
             if admin_info.get("sound_on", True):
@@ -324,7 +331,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except:
                     pass
 
-        # Уведомление пользователю
         await query.edit_message_text(
             "✅ **Вы записаны на предзапись!**\n\n"
             "Вам напишут в Telegram!\n"
@@ -355,7 +361,6 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
     if data == "admin_toggle_sound":
-        # Переключаем звук для текущего админа
         if user_id in admins:
             admins[user_id]["sound_on"] = not admins[user_id]["sound_on"]
             save_data()
@@ -393,28 +398,45 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, reply_markup=admin_menu(), parse_mode="Markdown")
 
     elif data == "admin_bookings":
-        if not prebook_settings:
-            await query.edit_message_text("📅 Записей пока нет.", reply_markup=admin_menu())
-            return
-
-        text = "📅 **Все записи:**\n\n"
-        keyboard = []
+        # Показываем все активные записи (и предзаписи, и доступные слоты)
+        bookings_list = []
         for slot_key, info in prebook_settings.items():
             if info.get("booked_by"):
+                # Предзапись
                 uid = info["booked_by"]
                 user_info = users.get(uid, {})
                 name = user_info.get("name", "Неизвестный")
                 date, time = slot_key.split("_")
-                date_display = f"{date.replace('_', ' ')}"
-                text += f"• {date_display} в {time} — {name} ✍️\n"
-                keyboard.append([InlineKeyboardButton(
-                    f"✍️ {date_display} {time} ({name})", 
-                    callback_data=f"admin_userinfo_{slot_key}"
-                )])
+                date_display = date.replace("_", " ")
+                bookings_list.append({
+                    "type": "✍️",
+                    "display": f"✍️ {date_display} {time} — {name}",
+                    "slot_key": slot_key,
+                    "callback": f"admin_userinfo_{slot_key}"
+                })
+            elif info.get("available", False):
+                # Доступный слот
+                date, time = slot_key.split("_")
+                date_display = date.replace("_", " ")
+                bookings_list.append({
+                    "type": "❌",
+                    "display": f"❌ {date_display} {time} — доступен",
+                    "slot_key": slot_key,
+                    "callback": f"admin_toggle_off_{slot_key}"
+                })
 
-        if not keyboard:
-            await query.edit_message_text("📅 Записей пока нет.", reply_markup=admin_menu())
+        if not bookings_list:
+            await query.edit_message_text("📅 Активных записей пока нет.", reply_markup=admin_menu())
             return
+
+        text = "📅 **Активные записи и слоты:**\n\n"
+        keyboard = []
+        for item in bookings_list:
+            text += f"• {item['display']}\n"
+            keyboard.append([InlineKeyboardButton(
+                item['display'],
+                callback_data=item['callback']
+            )])
 
         keyboard.append([InlineKeyboardButton("🔙 Назад в админку", callback_data="admin_back")])
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -456,19 +478,25 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("❌ Предзапись не найдена.", reply_markup=admin_menu())
 
     elif data == "admin_prebook_setup":
-        # Показываем список месяцев
         keyboard = []
         months = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", 
-                  "Июль", "Август", "Сентябрь", "Окторябрь", "Ноябрь", "Декабрь"]
+                  "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
         for month in months:
-            keyboard.append([InlineKeyboardButton(month, callback_data=f"admin_month_{month}")])
+            if has_active_slots_in_month(month):
+                keyboard.append([InlineKeyboardButton(f"📌 {month}", callback_data=f"admin_month_{month}")])
+            else:
+                keyboard.append([InlineKeyboardButton(month, callback_data=f"admin_month_{month}")])
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="admin_back")])
-        await query.edit_message_text("📅 **Выбери месяц для настройки:**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        await query.edit_message_text(
+            "📅 **Выбери месяц для настройки:**\n\n"
+            "📌 — в этом месяце есть активные слоты",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
 
     elif data.startswith("admin_month_"):
         month = data.replace("admin_month_", "")
         context.user_data["admin_month"] = month
-        # Показываем дни месяца
         days = 31
         if month in ["Апрель", "Июнь", "Сентябрь", "Ноябрь"]:
             days = 30
@@ -477,11 +505,15 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         keyboard = []
         for day in range(1, days + 1):
-            keyboard.append([InlineKeyboardButton(f"{day}", callback_data=f"admin_day_{month}_{day}")])
+            if has_active_slots_in_day(str(day), month):
+                keyboard.append([InlineKeyboardButton(f"📌 {day}", callback_data=f"admin_day_{month}_{day}")])
+            else:
+                keyboard.append([InlineKeyboardButton(f"{day}", callback_data=f"admin_day_{month}_{day}")])
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="admin_prebook_setup")])
         await query.edit_message_text(
             f"📅 **Выбери день в {month}:**\n\n"
-            "Ты сможешь выбрать несколько часов для этого дня.",
+            "📌 — в этот день есть активные слоты\n"
+            "Ты можешь выбрать несколько часов для этого дня.",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown"
         )
@@ -493,16 +525,13 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         date_key = f"{day}_{month}"
         context.user_data["admin_date"] = date_key
 
-        # Показываем часы с 10:00 до 22:00
         keyboard = []
         for hour in range(10, 23):
             time_slot = f"{hour:02d}:00"
             slot_key = f"{date_key}_{time_slot}"
             
-            # Проверяем статус слота
             if slot_key in prebook_settings:
                 if prebook_settings[slot_key].get("booked_by"):
-                    # Занято пользователем
                     uid = prebook_settings[slot_key]["booked_by"]
                     user_info = users.get(uid, {})
                     name = user_info.get("name", "Неизвестный")
@@ -511,25 +540,23 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         callback_data=f"admin_userinfo_{slot_key}"
                     )])
                 elif prebook_settings[slot_key].get("available", False):
-                    # Доступно для пользователей
                     keyboard.append([InlineKeyboardButton(
                         f"{time_slot} ❌", 
                         callback_data=f"admin_toggle_off_{slot_key}"
                     )])
                 else:
-                    # Скрыто
                     keyboard.append([InlineKeyboardButton(
                         f"{time_slot} ⬜", 
                         callback_data=f"admin_toggle_on_{slot_key}"
                     )])
             else:
-                # Не создано - можно создать
                 keyboard.append([InlineKeyboardButton(
                     f"{time_slot} ➕", 
                     callback_data=f"admin_create_{slot_key}"
                 )])
         
-        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data=f"admin_month_{month}")])
+        # Кнопка "Назад" — возвращаемся к дням этого же месяца
+        keyboard.append([InlineKeyboardButton("🔙 Назад к дням", callback_data=f"admin_month_{month}")])
         await query.edit_message_text(
             f"📅 **{day} {month}**\n\n"
             "🔘 ➕ — создать слот\n"
@@ -545,14 +572,108 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         slot_key = data.replace("admin_create_", "")
         prebook_settings[slot_key] = {"available": True, "booked_by": None}
         save_data()
-        await query.edit_message_text(f"✅ Слот {slot_key} создан и доступен для пользователей!", reply_markup=admin_menu())
+        # Остаёмся на этом же дне, просто обновляем клавиатуру
+        # Парсим дату из slot_key
+        date_part = slot_key.split("_")[0]
+        day, month = date_part.split("_")
+        # Пересоздаём экран с этим же днём
+        context.user_data["admin_month"] = month
+        await update.callback_query.edit_message_text(
+            f"✅ Слот {slot_key} создан и доступен для пользователей!",
+            reply_markup=admin_menu()
+        )
+        # Отправляем обратно на настройку дня
+        keyboard = []
+        for hour in range(10, 23):
+            time_slot = f"{hour:02d}:00"
+            new_slot_key = f"{date_part}_{time_slot}"
+            if new_slot_key in prebook_settings:
+                if prebook_settings[new_slot_key].get("booked_by"):
+                    uid = prebook_settings[new_slot_key]["booked_by"]
+                    user_info = users.get(uid, {})
+                    name = user_info.get("name", "Неизвестный")
+                    keyboard.append([InlineKeyboardButton(
+                        f"{time_slot} ✍️ {name}", 
+                        callback_data=f"admin_userinfo_{new_slot_key}"
+                    )])
+                elif prebook_settings[new_slot_key].get("available", False):
+                    keyboard.append([InlineKeyboardButton(
+                        f"{time_slot} ❌", 
+                        callback_data=f"admin_toggle_off_{new_slot_key}"
+                    )])
+                else:
+                    keyboard.append([InlineKeyboardButton(
+                        f"{time_slot} ⬜", 
+                        callback_data=f"admin_toggle_on_{new_slot_key}"
+                    )])
+            else:
+                keyboard.append([InlineKeyboardButton(
+                    f"{time_slot} ➕", 
+                    callback_data=f"admin_create_{new_slot_key}"
+                )])
+        keyboard.append([InlineKeyboardButton("🔙 Назад к дням", callback_data=f"admin_month_{month}")])
+        await context.bot.edit_message_text(
+            chat_id=update.effective_chat.id,
+            message_id=update.callback_query.message.message_id,
+            text=f"📅 **{day} {month}**\n\n"
+                 "🔘 ➕ — создать слот\n"
+                 "🔘 ⬜ — скрыт (не виден пользователям)\n"
+                 "🔘 ❌ — доступен для пользователей\n"
+                 "🔘 ✍️ — занят пользователем (нажми для инфо)\n\n"
+                 "Нажимай на время, чтобы менять статус:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
 
     elif data.startswith("admin_toggle_on_"):
         slot_key = data.replace("admin_toggle_on_", "")
         if slot_key in prebook_settings:
             prebook_settings[slot_key]["available"] = True
             save_data()
-            await query.edit_message_text(f"✅ Слот {slot_key} теперь доступен для пользователей!", reply_markup=admin_menu())
+            # Обновляем текущий экран без выхода
+            date_part = slot_key.split("_")[0]
+            day, month = date_part.split("_")
+            keyboard = []
+            for hour in range(10, 23):
+                time_slot = f"{hour:02d}:00"
+                new_slot_key = f"{date_part}_{time_slot}"
+                if new_slot_key in prebook_settings:
+                    if prebook_settings[new_slot_key].get("booked_by"):
+                        uid = prebook_settings[new_slot_key]["booked_by"]
+                        user_info = users.get(uid, {})
+                        name = user_info.get("name", "Неизвестный")
+                        keyboard.append([InlineKeyboardButton(
+                            f"{time_slot} ✍️ {name}", 
+                            callback_data=f"admin_userinfo_{new_slot_key}"
+                        )])
+                    elif prebook_settings[new_slot_key].get("available", False):
+                        keyboard.append([InlineKeyboardButton(
+                            f"{time_slot} ❌", 
+                            callback_data=f"admin_toggle_off_{new_slot_key}"
+                        )])
+                    else:
+                        keyboard.append([InlineKeyboardButton(
+                            f"{time_slot} ⬜", 
+                            callback_data=f"admin_toggle_on_{new_slot_key}"
+                        )])
+                else:
+                    keyboard.append([InlineKeyboardButton(
+                        f"{time_slot} ➕", 
+                        callback_data=f"admin_create_{new_slot_key}"
+                    )])
+            keyboard.append([InlineKeyboardButton("🔙 Назад к дням", callback_data=f"admin_month_{month}")])
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=update.callback_query.message.message_id,
+                text=f"📅 **{day} {month}**\n\n"
+                     "🔘 ➕ — создать слот\n"
+                     "🔘 ⬜ — скрыт (не виден пользователям)\n"
+                     "🔘 ❌ — доступен для пользователей\n"
+                     "🔘 ✍️ — занят пользователем (нажми для инфо)\n\n"
+                     "Нажимай на время, чтобы менять статус:",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
         else:
             await query.edit_message_text("❌ Слот не найден.", reply_markup=admin_menu())
 
@@ -561,7 +682,50 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if slot_key in prebook_settings:
             prebook_settings[slot_key]["available"] = False
             save_data()
-            await query.edit_message_text(f"✅ Слот {slot_key} скрыт от пользователей.", reply_markup=admin_menu())
+            # Обновляем текущий экран без выхода
+            date_part = slot_key.split("_")[0]
+            day, month = date_part.split("_")
+            keyboard = []
+            for hour in range(10, 23):
+                time_slot = f"{hour:02d}:00"
+                new_slot_key = f"{date_part}_{time_slot}"
+                if new_slot_key in prebook_settings:
+                    if prebook_settings[new_slot_key].get("booked_by"):
+                        uid = prebook_settings[new_slot_key]["booked_by"]
+                        user_info = users.get(uid, {})
+                        name = user_info.get("name", "Неизвестный")
+                        keyboard.append([InlineKeyboardButton(
+                            f"{time_slot} ✍️ {name}", 
+                            callback_data=f"admin_userinfo_{new_slot_key}"
+                        )])
+                    elif prebook_settings[new_slot_key].get("available", False):
+                        keyboard.append([InlineKeyboardButton(
+                            f"{time_slot} ❌", 
+                            callback_data=f"admin_toggle_off_{new_slot_key}"
+                        )])
+                    else:
+                        keyboard.append([InlineKeyboardButton(
+                            f"{time_slot} ⬜", 
+                            callback_data=f"admin_toggle_on_{new_slot_key}"
+                        )])
+                else:
+                    keyboard.append([InlineKeyboardButton(
+                        f"{time_slot} ➕", 
+                        callback_data=f"admin_create_{new_slot_key}"
+                    )])
+            keyboard.append([InlineKeyboardButton("🔙 Назад к дням", callback_data=f"admin_month_{month}")])
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=update.callback_query.message.message_id,
+                text=f"📅 **{day} {month}**\n\n"
+                     "🔘 ➕ — создать слот\n"
+                     "🔘 ⬜ — скрыт (не виден пользователям)\n"
+                     "🔘 ❌ — доступен для пользователей\n"
+                     "🔘 ✍️ — занят пользователем (нажми для инфо)\n\n"
+                     "Нажимай на время, чтобы менять статус:",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
         else:
             await query.edit_message_text("❌ Слот не найден.", reply_markup=admin_menu())
 
