@@ -45,7 +45,6 @@ def main_menu():
     keyboard = [
         [InlineKeyboardButton("📞 Контакты", callback_data="contacts")],
         [InlineKeyboardButton("👤 Профиль", callback_data="profile")],
-        [InlineKeyboardButton("✏️ Изменить контакты", callback_data="edit_contacts")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -167,17 +166,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📱 Телефон: {phone}"
         )
         await query.edit_message_text(text, reply_markup=main_menu(), parse_mode="Markdown")
-
-    elif data == "edit_contacts":
-        if user_id in users:
-            users[user_id]["contacts_given"] = False
-            users[user_id]["phone"] = None
-            save_data()
-        await query.edit_message_text(
-            "✏️ Обновим твои контакты. Нажми кнопку ниже:",
-            reply_markup=contact_keyboard()
-        )
-        return CONTACT
 
 # ---------- АДМИН-ХЕНДЛЕР ----------
 async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
