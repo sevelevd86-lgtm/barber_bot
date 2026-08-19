@@ -95,13 +95,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return CONTACT
 
-    # Показываем главное меню и нижнюю панель
+    # Показываем главное меню и нижнюю панель в ОДНОМ сообщении
     await update.message.reply_text(
-        f"✂️ С возвращением, {users[user_id]['name']}!",
+        f"✂️ С возвращением, {users[user_id]['name']}!\n\n"
+        "Выбери действие:",
         reply_markup=main_menu()
     )
+    # Отправляем нижнюю панель отдельно (она будет всегда видна)
     await update.message.reply_text(
-        "Выбери действие:",
+        "⬇️ Нижняя панель:",
         reply_markup=bottom_menu()
     )
     return
@@ -134,7 +136,7 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=main_menu()
     )
     await update.message.reply_text(
-        "Выбери действие:",
+        "⬇️ Нижняя панель:",
         reply_markup=bottom_menu()
     )
     return ConversationHandler.END
@@ -144,7 +146,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
 
-    # Обработка кнопки "Обновить бота"
     if text == "🔄 Обновить бота":
         await start(update, context)
         return
@@ -183,11 +184,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
             disable_web_page_preview=True
         )
-        # Показываем нижнюю панель
-        await query.message.reply_text(
-            "Выбери действие:",
-            reply_markup=bottom_menu()
-        )
 
     elif data == "profile":
         user_info = users.get(user_id, {})
@@ -203,10 +199,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text,
             reply_markup=main_menu(),
             parse_mode="Markdown"
-        )
-        await query.message.reply_text(
-            "Выбери действие:",
-            reply_markup=bottom_menu()
         )
 
 # ---------- АДМИН-ХЕНДЛЕР ----------
@@ -236,10 +228,6 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "admin_exit":
         await query.edit_message_text("Вы вышли из админ-панели.", reply_markup=main_menu())
-        await query.message.reply_text(
-            "Выбери действие:",
-            reply_markup=bottom_menu()
-        )
         context.user_data.clear()
         return
 
