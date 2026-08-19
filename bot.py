@@ -136,7 +136,7 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=main_menu()
     )
     await update.message.reply_text(
-        "⬇️ Нижняя панель:",
+        "🔄 Нижняя панель:",
         reply_markup=bottom_menu()
     )
     return ConversationHandler.END
