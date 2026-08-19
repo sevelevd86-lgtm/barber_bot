@@ -47,13 +47,8 @@ def main_menu():
         [InlineKeyboardButton("📅 Предварительная запись", callback_data="contacts")],
         [InlineKeyboardButton("👤 Профиль", callback_data="profile")],
         [InlineKeyboardButton("🔄 Обновить бота", callback_data="restart")],
-        [InlineKeyboardButton("📸 Инстаграм", callback_data="instagram")],
     ]
     return InlineKeyboardMarkup(keyboard)
-
-def contact_keyboard():
-    button = KeyboardButton("📱 Отправить номер телефона", request_contact=True)
-    return ReplyKeyboardMarkup([[button]], resize_keyboard=True, one_time_keyboard=True)
 
 def admin_menu():
     keyboard = [
@@ -70,6 +65,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     first_name = update.effective_user.first_name
 
+    # Проверяем, есть ли пользователь в базе
     if user_id not in users:
         users[user_id] = {
             "name": first_name,
@@ -80,19 +76,27 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         save_data()
 
-    if has_contacts(user_id):
-        await update.message.reply_text(
-            f"✂️ С возвращением, {users[user_id]['name']}!",
-            reply_markup=main_menu()
+    # Если контактов нет — запрашиваем ТОЛЬКО при первом старте
+    if not has_contacts(user_id):
+        # Создаём клавиатуру с кнопкой "Отправить номер"
+        contact_keyboard = ReplyKeyboardMarkup(
+            [[KeyboardButton("📱 Отправить номер телефона", request_contact=True)]],
+            resize_keyboard=True,
+            one_time_keyboard=True
         )
-        return
+        await update.message.reply_text(
+            f"👋 Привет, {first_name}!\n\n"
+            "Чтобы пользоваться ботом, нажми на кнопку ниже и отправь свой номер телефона.",
+            reply_markup=contact_keyboard
+        )
+        return CONTACT
 
+    # Если контакты уже есть — показываем главное меню
     await update.message.reply_text(
-        f"👋 Привет, {first_name}!\n\n"
-        "Чтобы пользоваться ботом, нажми на кнопку ниже и отправь свой номер телефона.",
-        reply_markup=contact_keyboard()
+        f"✂️ С возвращением, {users[user_id]['name']}!",
+        reply_markup=main_menu()
     )
-    return CONTACT
+    return
 
 async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -101,7 +105,11 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not contact:
         await update.message.reply_text(
             "Пожалуйста, используй кнопку 'Отправить номер телефона'.",
-            reply_markup=contact_keyboard()
+            reply_markup=ReplyKeyboardMarkup(
+                [[KeyboardButton("📱 Отправить номер телефона", request_contact=True)]],
+                resize_keyboard=True,
+                one_time_keyboard=True
+            )
         )
         return CONTACT
 
@@ -144,19 +152,30 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "restart":
-        # Отправляем /start в этот же чат
-        await query.edit_message_text(
-            "🔄 Перезапускаю бота...",
-            reply_markup=main_menu()
-        )
+        # Отправляем команду /start заново
+        await query.edit_message_text("🔄 Перезапускаю бота...")
         # Запускаем команду /start
         await start(update, context)
         return
 
-    if data == "instagram":
+    if data != "contacts" and not has_contacts(user_id):
+        contact_keyboard = ReplyKeyboardMarkup(
+            [[KeyboardButton("📱 Отправить номер телефона", request_contact=True)]],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
+        await query.edit_message_text(
+            "Сначала укажи свои контакты, нажав кнопку ниже.",
+            reply_markup=contact_keyboard
+        )
+        return CONTACT
+
+    if data == "contacts":
         text = (
-            "📸 **Наш Инстаграм:**\n\n"
-            f"[Перейти в Инстаграм]({INSTAGRAM_URL})"
+            "📞 **Связь с нами:**\n\n"
+            "✂️ Telegram: @DMITROVSTAS\n"
+            f"📸 [Инстаграм]({INSTAGRAM_URL})\n"
+            "🕐 Работаем: ежедневно с 10:00 до 22:00"
         )
         await query.edit_message_text(
             text,
@@ -164,22 +183,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
             disable_web_page_preview=True
         )
-        return
-
-    if data != "contacts" and not has_contacts(user_id):
-        await query.edit_message_text(
-            "Сначала укажи свои контакты, нажав кнопку ниже.",
-            reply_markup=contact_keyboard()
-        )
-        return
-
-    if data == "contacts":
-        text = (
-            "📞 **Связь с нами:**\n\n"
-            "✂️ Telegram: @DMITROVSTAS\n"
-            "🕐 Работаем: ежедневно с 10:00 до 22:00"
-        )
-        await query.edit_message_text(text, reply_markup=main_menu(), parse_mode="Markdown")
 
     elif data == "profile":
         user_info = users.get(user_id, {})
