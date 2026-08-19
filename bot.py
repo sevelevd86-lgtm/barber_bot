@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 # ---------- КЛАВИАТУРЫ ----------
 def main_menu():
     keyboard = [
-        [InlineKeyboardButton("📞 Контакты", callback_data="contacts")],
+        [InlineKeyboardButton("📅 Предварительная запись", callback_data="contacts")],
         [InlineKeyboardButton("👤 Профиль", callback_data="profile")],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -140,7 +140,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await admin_handler(update, context)
         return
 
-    if data != "edit_contacts" and not has_contacts(user_id):
+    if data != "contacts" and not has_contacts(user_id):
         await query.edit_message_text(
             "Сначала укажи свои контакты, нажав кнопку ниже.",
             reply_markup=contact_keyboard()
