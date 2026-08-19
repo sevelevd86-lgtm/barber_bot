@@ -7,6 +7,7 @@ import os
 
 # ---------- НАСТРОЙКИ ----------
 TOKEN = "8944409425:AAGC659vkO9fJPzBAoHOTBVP-ClS4t0UclY"
+INSTAGRAM_URL = "https://www.instagram.com/dmitrovstashair?igsh=MWdsOW9vemtzNmx1eg=="
 
 # ---------- СОСТОЯНИЯ ----------
 CONTACT = 1
@@ -45,6 +46,8 @@ def main_menu():
     keyboard = [
         [InlineKeyboardButton("📅 Предварительная запись", callback_data="contacts")],
         [InlineKeyboardButton("👤 Профиль", callback_data="profile")],
+        [InlineKeyboardButton("🔄 Обновить бота", callback_data="restart")],
+        [InlineKeyboardButton("📸 Инстаграм", callback_data="instagram")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -138,6 +141,29 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("admin_"):
         await admin_handler(update, context)
+        return
+
+    if data == "restart":
+        # Отправляем /start в этот же чат
+        await query.edit_message_text(
+            "🔄 Перезапускаю бота...",
+            reply_markup=main_menu()
+        )
+        # Запускаем команду /start
+        await start(update, context)
+        return
+
+    if data == "instagram":
+        text = (
+            "📸 **Наш Инстаграм:**\n\n"
+            f"[Перейти в Инстаграм]({INSTAGRAM_URL})"
+        )
+        await query.edit_message_text(
+            text,
+            reply_markup=main_menu(),
+            parse_mode="Markdown",
+            disable_web_page_preview=True
+        )
         return
 
     if data != "contacts" and not has_contacts(user_id):
