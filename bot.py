@@ -43,12 +43,19 @@ logger = logging.getLogger(__name__)
 
 # ---------- КЛАВИАТУРЫ ----------
 def main_menu():
+    """Главное меню (инлайн-кнопки в сообщении)"""
     keyboard = [
         [InlineKeyboardButton("📅 Предварительная запись", callback_data="contacts")],
         [InlineKeyboardButton("👤 Профиль", callback_data="profile")],
-        [InlineKeyboardButton("🔄 Обновить бота", callback_data="restart")],
     ]
     return InlineKeyboardMarkup(keyboard)
+
+def bottom_menu():
+    """Нижняя панель с кнопкой 'Обновить бота'"""
+    keyboard = [
+        [KeyboardButton("🔄 Обновить бота")]
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 def admin_menu():
     keyboard = [
@@ -65,7 +72,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     first_name = update.effective_user.first_name
 
-    # Проверяем, есть ли пользователь в базе
     if user_id not in users:
         users[user_id] = {
             "name": first_name,
@@ -76,9 +82,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         save_data()
 
-    # Если контактов нет — запрашиваем ТОЛЬКО при первом старте
     if not has_contacts(user_id):
-        # Создаём клавиатуру с кнопкой "Отправить номер"
         contact_keyboard = ReplyKeyboardMarkup(
             [[KeyboardButton("📱 Отправить номер телефона", request_contact=True)]],
             resize_keyboard=True,
@@ -91,10 +95,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return CONTACT
 
-    # Если контакты уже есть — показываем главное меню
+    # Показываем главное меню и нижнюю панель
     await update.message.reply_text(
         f"✂️ С возвращением, {users[user_id]['name']}!",
         reply_markup=main_menu()
+    )
+    await update.message.reply_text(
+        "Выбери действие:",
+        reply_markup=bottom_menu()
     )
     return
 
@@ -103,13 +111,14 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     contact = update.message.contact
 
     if not contact:
+        contact_keyboard = ReplyKeyboardMarkup(
+            [[KeyboardButton("📱 Отправить номер телефона", request_contact=True)]],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
         await update.message.reply_text(
             "Пожалуйста, используй кнопку 'Отправить номер телефона'.",
-            reply_markup=ReplyKeyboardMarkup(
-                [[KeyboardButton("📱 Отправить номер телефона", request_contact=True)]],
-                resize_keyboard=True,
-                one_time_keyboard=True
-            )
+            reply_markup=contact_keyboard
         )
         return CONTACT
 
@@ -124,13 +133,22 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Теперь ты можешь пользоваться ботом:",
         reply_markup=main_menu()
     )
+    await update.message.reply_text(
+        "Выбери действие:",
+        reply_markup=bottom_menu()
+    )
     return ConversationHandler.END
 
 # ---------- ОБРАБОТЧИК ТЕКСТА ----------
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
-    
+
+    # Обработка кнопки "Обновить бота"
+    if text == "🔄 Обновить бота":
+        await start(update, context)
+        return
+
     if text == "Стасбар":
         if user_id not in admins:
             admins[user_id] = {"sound_on": True}
@@ -139,6 +157,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🔐 Админ-панель",
             reply_markup=admin_menu()
         )
+        return
 
 # ---------- ОБРАБОТЧИК КНОПОК ----------
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -150,25 +169,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("admin_"):
         await admin_handler(update, context)
         return
-
-    if data == "restart":
-        # Отправляем команду /start заново
-        await query.edit_message_text("🔄 Перезапускаю бота...")
-        # Запускаем команду /start
-        await start(update, context)
-        return
-
-    if data != "contacts" and not has_contacts(user_id):
-        contact_keyboard = ReplyKeyboardMarkup(
-            [[KeyboardButton("📱 Отправить номер телефона", request_contact=True)]],
-            resize_keyboard=True,
-            one_time_keyboard=True
-        )
-        await query.edit_message_text(
-            "Сначала укажи свои контакты, нажав кнопку ниже.",
-            reply_markup=contact_keyboard
-        )
-        return CONTACT
 
     if data == "contacts":
         text = (
@@ -183,6 +183,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
             disable_web_page_preview=True
         )
+        # Показываем нижнюю панель
+        await query.message.reply_text(
+            "Выбери действие:",
+            reply_markup=bottom_menu()
+        )
 
     elif data == "profile":
         user_info = users.get(user_id, {})
@@ -194,7 +199,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Имя: {name}\n"
             f"📱 Телефон: {phone}"
         )
-        await query.edit_message_text(text, reply_markup=main_menu(), parse_mode="Markdown")
+        await query.edit_message_text(
+            text,
+            reply_markup=main_menu(),
+            parse_mode="Markdown"
+        )
+        await query.message.reply_text(
+            "Выбери действие:",
+            reply_markup=bottom_menu()
+        )
 
 # ---------- АДМИН-ХЕНДЛЕР ----------
 async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -223,6 +236,10 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "admin_exit":
         await query.edit_message_text("Вы вышли из админ-панели.", reply_markup=main_menu())
+        await query.message.reply_text(
+            "Выбери действие:",
+            reply_markup=bottom_menu()
+        )
         context.user_data.clear()
         return
 
